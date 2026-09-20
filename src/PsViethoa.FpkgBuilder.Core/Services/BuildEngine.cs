@@ -226,6 +226,10 @@ public sealed class BuildEngine
 
             cancellationToken.ThrowIfCancellationRequested();
 
+            // Cảnh báo trước khi nén: game dùng sce::Ampr có thể treo ở màn hình splash khi cài từ gói. Điểm này nằm trước mọi
+            // nhánh (SDK thường, SDK + Dokan, bản vá, engine tích hợp) nên mọi lượt tạo gói đều được cảnh báo một lần.
+            WarnAmprGame(sourceFolder, log, cancellationToken);
+
             // SDK Sony: GP5 phẳng trỏ thẳng vào từng tệp nguồn (như build-from-folder.ps1 với --absolute-paths), nên không cần
             // thư mục gương — tệp cần bỏ chỉ việc không liệt kê, param.json đã sửa trỏ sang bản trong thư mục tạm. Ổ ảo Dokan đã
             // tự ẩn tệp và đè param.json khi gắn nên dùng nguyên như script gốc.
@@ -971,6 +975,30 @@ public sealed class BuildEngine
         }
 
         return folders;
+    }
+
+    /// <summary>
+    /// <c>eboot.bin</c> gọi <c>libSceAmpr</c> nghĩa là game dùng sce::Ampr (AMM + APR) — một thư viện PS5 thật, KHÔNG phải dấu vết
+    /// bị vá: bản sao lưu <c>eboot.bin.esbak</c> của các game này cũng gọi đúng thư viện đó. Gói của game dùng AMPR có thể treo ở
+    /// màn hình splash, và không builder nào sửa được vì lỗi nằm ở phía hệ thống. Người dùng cần biết TRƯỚC khi chờ hết lượt nén.
+    /// </summary>
+    private static void WarnAmprGame(string sourceFolder, Action<LogEntry> log, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (AmprInspector.ScanFolder(sourceFolder, cancellationToken).EbootImports)
+            {
+                log(new LogEntry(LogLevel.Warning, Loc.T("Plan.AmprGame")));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Cảnh báo là phụ: không đọc được eboot thì cứ tạo gói như thường.
+        }
     }
 
     private static void LogCleanup(IReadOnlyCollection<string> hidden, IReadOnlyCollection<string> emptyFolders, Action<LogEntry> log)

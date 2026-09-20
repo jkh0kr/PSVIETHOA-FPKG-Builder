@@ -50,6 +50,15 @@ public static class SonySdkPatchReference
             throw new InvalidDataException(Loc.F("Patch.ReferenceUnreadable", System.IO.Path.GetFileName(full), "Content ID"));
         }
 
+        // img_create --ref_pkg_path đọc naps_meta_*.dat của gói gốc trong vùng supplement ("prev_suppl/common/etc/naps_meta_18.dat"
+        // trong libScePubTools). Gói đã bị đóng gói lại bằng công cụ ngoài (bản "fake"/vá giấy phép) thường bỏ hẳn vùng này, và
+        // Publishing Tools chỉ báo "Unexpected logical error. (NAPS metadata missing)" SAU khi đã nén xong cả gói — vài phút tới
+        // vài giờ. Chặn ngay tại đây để người dùng biết liền.
+        if (!info.HasSupplement)
+        {
+            throw new InvalidDataException(Loc.F("Patch.ReferenceNoNaps", System.IO.Path.GetFileName(full)));
+        }
+
         return new SonySdkReferenceInfo(full, contentId, info.Params?.ContentVersion, new FileInfo(full).Length);
     }
 
