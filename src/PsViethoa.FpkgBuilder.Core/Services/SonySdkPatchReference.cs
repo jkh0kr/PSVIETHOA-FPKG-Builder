@@ -50,13 +50,19 @@ public static class SonySdkPatchReference
             throw new InvalidDataException(Loc.F("Patch.ReferenceUnreadable", System.IO.Path.GetFileName(full), "Content ID"));
         }
 
-        // img_create --ref_pkg_path đọc naps_meta_*.dat của gói gốc trong vùng supplement ("prev_suppl/common/etc/naps_meta_18.dat"
-        // trong libScePubTools). Gói đã bị đóng gói lại bằng công cụ ngoài (bản "fake"/vá giấy phép) thường bỏ hẳn vùng này, và
-        // Publishing Tools chỉ báo "Unexpected logical error. (NAPS metadata missing)" SAU khi đã nén xong cả gói — vài phút tới
-        // vài giờ. Chặn ngay tại đây để người dùng biết liền.
-        if (!info.HasSupplement)
+        // img_create --ref_pkg_path đọc "prev_suppl/common/etc/naps_meta_18.dat" của gói gốc (chuỗi nằm trong libScePubTools) và
+        // giải mã bằng khoá riêng của Publishing Tools. Hai kiểu gói không dùng làm tham chiếu được, và cả hai đều chỉ lộ ra sau
+        // khi SDK đã nén xong cả gói — "Unexpected logical error. (NAPS metadata missing)", đo thực tế 4 phút cho gói base 33 GB
+        // và hàng giờ cho gói 100 GB. Xem SonySdkReferenceProbe: chỉ đọc một thành viên ZIP, 0,1 giây, không ghi gì ra đĩa.
+        var origin = info.HasSupplement ? SonySdkReferenceProbe.Probe(full) : SonySdkReferenceOrigin.NoNapsMetadata;
+        if (origin == SonySdkReferenceOrigin.NoNapsMetadata)
         {
             throw new InvalidDataException(Loc.F("Patch.ReferenceNoNaps", System.IO.Path.GetFileName(full)));
+        }
+
+        if (origin == SonySdkReferenceOrigin.BuiltInEngine)
+        {
+            throw new InvalidDataException(Loc.F("Patch.ReferenceBuiltInEngine", System.IO.Path.GetFileName(full)));
         }
 
         return new SonySdkReferenceInfo(full, contentId, info.Params?.ContentVersion, new FileInfo(full).Length);

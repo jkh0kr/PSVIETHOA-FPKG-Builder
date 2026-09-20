@@ -162,6 +162,60 @@ public sealed class SonySdkPatchTests : IDisposable
         Assert.Empty(Directory.EnumerateFiles(request.OutputFolder, "*.pkg"));
     }
 
+    /// <summary>
+    /// Gói gốc do engine tích hợp tạo: Publishing Tools chỉ báo "NAPS metadata missing" sau khi nén xong cả gói (4 phút với gói
+    /// base 33 GB, hàng giờ với gói 100 GB), nên phải chặn ngay khi chọn tệp. Đồng thời ghim dấu vân tay của hai engine: gói của
+    /// SDK Sony không được nhận nhầm là gói của engine tích hợp, nếu không mọi bản vá đều bị chặn oan.
+    /// </summary>
+    [Fact]
+    public async Task Patch_RejectsABasePackageBuiltByTheBuiltInEngine()
+    {
+        if (SonySdkToolchain.Resolve(out _) == null || !BuildEngine.KeysAvailable)
+        {
+            return;
+        }
+
+        var source = MakeSource("origin-game", "01.000.000");
+
+        var builtInRequest = Request(source, "origin-builtin", "01.000.000");
+        builtInRequest.UseSonySdk = false;
+        var builtIn = await new BuildEngine().BuildAsync(builtInRequest, _ => { }, null, CancellationToken.None);
+        Assert.Equal(SonySdkReferenceOrigin.BuiltInEngine, SonySdkReferenceProbe.Probe(builtIn.OutputPath));
+
+        var sdk = await new BuildEngine().BuildAsync(Request(source, "origin-sdk", "01.000.000"), _ => { }, null, CancellationToken.None);
+        Assert.Equal(SonySdkReferenceOrigin.PublishingTools, SonySdkReferenceProbe.Probe(sdk.OutputPath));
+
+        // Chặn khi chọn tệp, trước khi Publishing Tools chạy: không dòng "SDK: " nào và không gói nào được ghi ra.
+        var log = new List<LogEntry>();
+        var request = Request(source, "origin-patch", "01.001.000");
+        request.SdkReferencePackage = builtIn.OutputPath;
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new BuildEngine().BuildAsync(request, log.Add, null, CancellationToken.None));
+        Assert.Contains(Path.GetFileName(builtIn.OutputPath), error.Message);
+        Assert.DoesNotContain(log, e => e.Message.StartsWith("SDK: ", StringComparison.Ordinal));
+        Assert.False(Directory.Exists(request.OutputFolder) && Directory.EnumerateFiles(request.OutputFolder, "*.pkg").Any());
+
+        // Cùng gói đó dùng làm gói gốc cho bản vá của SDK thì chạy được, nên lỗi trên đúng là do engine chứ không phải do nguồn.
+        SetContentVersion(source, "01.001.000");
+        var ok = Request(source, "origin-ok", "01.001.000");
+        ok.SdkReferencePackage = sdk.OutputPath;
+        var outcome = await new BuildEngine().BuildAsync(ok, _ => { }, null, CancellationToken.None);
+        Assert.True(File.Exists(outcome.OutputPath));
+    }
+
+    /// <summary>Gói không có vùng supplement và gói rác: nhận ra là "không có NAPS metadata", không ném lỗi.</summary>
+    [Fact]
+    public void Probe_TreatsUnreadablePackagesAsMissingMetadata()
+    {
+        Directory.CreateDirectory(_root);
+        var garbage = Path.Combine(_root, "probe-garbage.pkg");
+        File.WriteAllBytes(garbage, Enumerable.Range(0, 4096).Select(i => (byte)i).ToArray());
+
+        Assert.Equal(SonySdkReferenceOrigin.NoNapsMetadata, SonySdkReferenceProbe.Probe(garbage));
+        Assert.Equal(SonySdkReferenceOrigin.NoNapsMetadata, SonySdkReferenceProbe.Probe(Path.Combine(_root, "probe-none.pkg")));
+        Assert.False(SonySdkReferenceProbe.IsBuiltInEngineMeta18([]));
+        Assert.False(SonySdkReferenceProbe.IsBuiltInEngineMeta18(new byte[4096]));
+    }
+
     [Fact]
     public async Task Patch_RejectsABasePackageOfAnotherGame()
     {

@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.2.4 — 2026-09-21
+
+- **A base package built by the built-in engine is rejected in 0.3 s instead of after the whole package has been compressed, and 2.2.3's explanation of this error is corrected.** Reported case: an update build against a 33 GB Days Gone: Remastered base package stopped at 94 % with `Unexpected logical error. (NAPS metadata missing)` after 4 min 1 s. 2.2.3 assumed the cause was a repacked base package whose supplement region had been stripped, and only checked that the region exists (`PackageInfo.HasSupplement`, i.e. `SupplementSize > 0`). **That assumption was wrong.** Measured on the reported package: the supplement region is present (47.5 MB), holds `common/etc/naps_meta_18.dat` (45.3 MB), and that file decrypts cleanly with `ProsperoNapsMeta.DecryptMeta18` into a well-formed TLV stream (`phdr`, 1 × 24 bytes, then `file`) whose block count matches the package header exactly. Nothing is missing.
+
+  The real cause is *who wrote it*. Building the same source twice — once through the Sony SDK, once through the built-in engine — gives two different supplement regions:
+
+  | | Sony SDK (Publishing Tools) | Built-in engine (LibProsperoPkg) | Reported base package |
+  |---|---|---|---|
+  | `naps_meta_18.dat` decrypts with the library key | no (own key) | **yes** | **yes** |
+  | `naps_meta_300/301/302/308.dat` | 72 bytes (3 × 24-byte records) | **48 bytes (2 records, no `id=1`)** | **48 bytes** |
+  | SI members | 8 (incl. `playgo-scenario.json`) | **7** | **7** |
+
+  So the base package was built by the built-in engine. `img_create --ref_pkg_path` reads `prev_suppl/common/etc/naps_meta_18.dat` (the string is in `libScePubTools.dll`) and decrypts it with Publishing Tools' own key; against a built-in-engine package that yields garbage, and the toolkit reports the metadata as missing — but only after compressing everything.
+
+  New `SonySdkReferenceProbe` tells the two producers apart by reading that one ZIP member (`ProsperoPublishingSidecar.TryReadNapsMeta18`, nothing written to disk) and testing whether it decrypts into a `phdr` TLV. `SonySdkPatchReference.Inspect` now stops on a built-in-engine base with a message that says which engine made it and what to do (rebuild the base with Sony SDK on, or leave the base package box empty and build a full package). Measured on the reported package: **0.31 s, versus 4 min 1 s before**; on a 100 GB game the old path costs hours. A package with no supplement region at all keeps the earlier message, reworded — the "repacked by an external tool" wording was part of the wrong diagnosis and is gone.
+
+  Tests build a base package with each engine through the real toolchain and assert the fingerprints, that the built-in-engine base is refused before any `SDK:` log line or output file appears, and that the Sony SDK base built from the same source still produces a patch.
+
 ## 2.2.3 — 2026-09-20
 
 - **A base package without NAPS metadata is rejected before the build instead of after it.** `img_create --ref_pkg_path` reads the base package's supplement region for `common/etc/naps_meta_*.dat` (`prev_suppl/common/etc/naps_meta_18.dat` in `libScePubTools.dll`); a package that was repacked by an external tool — a `P30Day`/license-patched or re-shared build — can be missing it, and Publishing Tools then stops with `Unexpected logical error. (NAPS metadata missing)` **only after compressing the whole package** (reported: 3 min 56 s for a 3 GB game; hours for a 100 GB one). `SonySdkPatchReference.Inspect` now checks the supplement region, which it already reads from the header, and stops in a second with a message that names the cause and the two ways out (use a base package built by this tool, or leave the field empty to build a full package). Verified against six real packages — Ghost of Yōtei, GTA V, Stellar Blade + DLC, FFVII Rebirth and a third-party DUPLEX unlocker — all of which carry the metadata and are accepted. The base package from the original report was not available, so the deeper case (supplement present but `naps_meta` missing inside) is not covered: checking that needs the SI entries extracted (measured: 2.2 s and 103 MB of temporary files for a 96 GB package), which is too much for every build. `fpkg-cli pkg-extract <pkg> --cnt` writes the SI entries when a specific package has to be diagnosed.
