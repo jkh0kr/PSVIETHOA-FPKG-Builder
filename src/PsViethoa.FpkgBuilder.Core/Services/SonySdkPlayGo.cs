@@ -54,8 +54,11 @@ public sealed record PlayGoStructure(
     /// <summary>Bố cục script: tệp giữ chỗ cho từng chunk ngôn ngữ.</summary>
     public IReadOnlyList<PlayGoLanguagePayload> LanguagePayloads { get; init; } = Array.Empty<PlayGoLanguagePayload>();
 
-    /// <summary>Gói gốc chỉ có một chunk / một kịch bản: giữ nguyên cách của script gốc (không cần chunk_info riêng).</summary>
-    public bool IsTrivial => Chunks.Count == 1 && Scenarios.Count == 1;
+    /// <summary>
+    /// Gói gốc chỉ có một chunk / một kịch bản: dùng chunk_info tối giản (không cần cấu trúc riêng). Bố cục script với 1 chunk vẫn
+    /// không tầm thường: script fix12 ghi ngôn ngữ và tệp giữ chỗ vào chunk 0.
+    /// </summary>
+    public bool IsTrivial => !ScriptLayout && Chunks.Count == 1 && Scenarios.Count == 1;
 
     /// <summary>Chunk mà tệp <paramref name="relativePath"/> (a/b/c) thuộc về trong gói gốc; null khi không có trong bảng.</summary>
     public int? ChunkOf(string relativePath)
@@ -274,7 +277,7 @@ public static class SonySdkPlayGo
             new Dictionary<ulong, int>());
     }
 
-    /// <summary>Script fix6: tối đa 5 kịch bản (SCE_PLAYGO_MAX_SCENARIO của SDK), 100 chunk, tệp giữ chỗ 1 MiB mỗi chunk ngôn ngữ.</summary>
+    /// <summary>Script fix6+: tối đa 5 kịch bản (SCE_PLAYGO_MAX_SCENARIO của SDK), mặc định 100 chunk (fix12: 1–255), tệp giữ chỗ 1 MiB mỗi ngôn ngữ.</summary>
     public const int ScriptScenarioLimit = 5;
 
     public const int ScriptChunkCount = 100;
@@ -294,7 +297,7 @@ public static class SonySdkPlayGo
     public static PlayGoStructure ScriptFallback(string sceSysFolder, string fallbackLanguage, out string? warning, int chunkCount = ScriptChunkCount)
     {
         warning = null;
-        chunkCount = Math.Clamp(chunkCount, 2, MaxChunks);
+        chunkCount = Math.Clamp(chunkCount, 1, MaxChunks);
         var codes = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var code in LanguageCodes)
         {
@@ -352,16 +355,24 @@ public static class SonySdkPlayGo
             }
         }
 
+        // fix12: ngôn ngữ thứ i (đếm từ 1) vào chunk min(i, N − 1) — thiếu chunk thì các ngôn ngữ cuối dùng chung chunk cuối.
+        static int ChunkFor(int languageNumber, int count) => Math.Min(languageNumber, count - 1);
         for (var id = 0; id < chunkCount; id++)
         {
-            var own = id >= 1 && id <= languages.Count ? languages[id - 1] : null;
-            var mask = own == null ? supportedMask : LanguageIndex(own) is var languageIndex && languageIndex >= 0 ? LanguageBit(languageIndex) : 0;
-            chunks.Add(new PlayGoChunk(id, mask, $"Chunk #{id}", own ?? all));
-            if (own != null)
+            var assigned = languages.Where((_, index) => ChunkFor(index + 1, chunkCount) == id).ToList();
+            ulong mask = 0;
+            foreach (var code in assigned)
             {
-                var safe = System.Text.RegularExpressions.Regex.Replace(own, "[^A-Za-z0-9._-]", "_");
-                payloads.Add(new PlayGoLanguagePayload($"{LanguagePayloadFolder}/{id:00}-{safe}.bin", id, own));
+                mask |= LanguageIndex(code) is var languageIndex && languageIndex >= 0 ? LanguageBit(languageIndex) : 0;
             }
+
+            chunks.Add(new PlayGoChunk(id, assigned.Count == 0 ? supportedMask : mask, $"Chunk #{id}", assigned.Count == 0 ? all : string.Join(' ', assigned)));
+        }
+
+        for (var index = 0; index < languages.Count; index++)
+        {
+            var safe = System.Text.RegularExpressions.Regex.Replace(languages[index], "[^A-Za-z0-9._-]", "_");
+            payloads.Add(new PlayGoLanguagePayload($"{LanguagePayloadFolder}/{index + 1:00}-{safe}.bin", ChunkFor(index + 1, chunkCount), languages[index]));
         }
 
         return new PlayGoStructure(supportedMask, Math.Max(0, LanguageIndex(chunkDefault)), defaultId, chunks, definitions, new Dictionary<ulong, int>())
@@ -512,11 +523,6 @@ public static class SonySdkPlayGo
             throw new InvalidDataException($"{path} chunkDefaultLanguage is not present in chunkSupportedLanguages");
         }
 
-        if (supported.Count >= ScriptChunkCount)
-        {
-            throw new InvalidDataException($"{path} declares too many chunk languages for {ScriptChunkCount} PlayGo chunks");
-        }
-
         supportedLanguages = supported;
         return value;
     }
@@ -591,7 +597,7 @@ public static class SonySdkPlayGo
             {
                 xml.Append("        <scenario id=\"").Append(scenario.Id).Append("\" type=\"").Append(SonySdkProject.EscapeAttribute(scenario.Type))
                     .Append("\" initial_chunk_count=\"").Append(structure.Chunks.Count).Append("\" label=\"").Append(SonySdkProject.EscapeAttribute(scenario.Label)).Append("\">")
-                    .Append("0-").Append(structure.Chunks.Count - 1).Append("</scenario>\n");
+                    .Append(structure.Chunks.Count > 1 ? "0-" + (structure.Chunks.Count - 1) : "0").Append("</scenario>\n");
             }
 
             xml.Append("      </scenarios>\n");

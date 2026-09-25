@@ -662,6 +662,11 @@ internal static class CommandLine
             request.RemoveAmprLeftovers = false;
         }
 
+        if (arguments.Has("keep-dump-leftovers"))
+        {
+            request.RemoveDumpLeftovers = false;
+        }
+
         if (arguments.Has("keep-playgo"))
         {
             request.RemovePlayGoFiles = false;

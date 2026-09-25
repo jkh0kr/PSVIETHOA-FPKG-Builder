@@ -1005,7 +1005,13 @@ public sealed class BuildEngine
     {
         var playgo = hidden.Where(PlayGoCleanup.IsCandidate).ToList();
         var dlc = hidden.Where(DlcEmuSet.Contains).ToList();
-        var ampr = hidden.Except(playgo, StringComparer.OrdinalIgnoreCase).Except(dlc, StringComparer.OrdinalIgnoreCase).ToList();
+        var dump = hidden.Where(DumpLeftoverInspector.LooksLikeCandidate).Except(playgo, StringComparer.OrdinalIgnoreCase).Except(dlc, StringComparer.OrdinalIgnoreCase).ToList();
+        var ampr = hidden.Except(playgo, StringComparer.OrdinalIgnoreCase).Except(dlc, StringComparer.OrdinalIgnoreCase).Except(dump, StringComparer.OrdinalIgnoreCase).ToList();
+        if (dump.Count > 0)
+        {
+            log(new LogEntry(LogLevel.Info, Loc.F("Plan.DumpLeftoversRemoved", string.Join(", ", dump.Select(folder => folder + "/")))));
+        }
+
         if (ampr.Count > 0)
         {
             log(new LogEntry(LogLevel.Info, Loc.F("Plan.AmprRemoved", string.Join(", ", ampr))));
@@ -1063,8 +1069,14 @@ public sealed class BuildEngine
             paths.AddRange(DlcEmuInspector.Candidates());
         }
 
+        if (request.RemoveDumpLeftovers)
+        {
+            // Thư mục cả cụm (_DUBLEX_, Saved của Unreal): gương, bản giải nén và GP5 của SDK đều bỏ được nguyên thư mục.
+            paths.AddRange(DumpLeftoverInspector.FindInFolder(appFolder));
+        }
+
         return paths
-            .Where(relative => File.Exists(System.IO.Path.Combine(appFolder, relative.Replace('/', System.IO.Path.DirectorySeparatorChar))))
+            .Where(relative => System.IO.Path.Combine(appFolder, relative.Replace('/', System.IO.Path.DirectorySeparatorChar)) is var full && (File.Exists(full) || Directory.Exists(full)))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -1123,6 +1135,14 @@ public sealed class BuildEngine
                 paths.AddRange(invalid);
                 invalidPlayGo.AddRange(invalid);
                 log(new LogEntry(LogLevel.Warning, Loc.F("Plan.PlayGoInvalid", PlayGoCleanup.Describe(invalid))));
+            }
+
+            if (request.RemoveDumpLeftovers)
+            {
+                // Ổ ảo Dokan ẩn được nguyên thư mục.
+                var leftovers = DumpLeftoverInspector.FindInImage(image, appRoot);
+                paths.AddRange(leftovers);
+                present.AddRange(leftovers);
             }
 
             var removed = new HashSet<string>(present, StringComparer.OrdinalIgnoreCase);

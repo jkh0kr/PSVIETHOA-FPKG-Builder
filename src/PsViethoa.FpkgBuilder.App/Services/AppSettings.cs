@@ -142,6 +142,9 @@ public sealed class AppSettings
     /// <summary>Dọn tàn dư AMPR emu (ampr_emu.index) khỏi gói.</summary>
     public bool RemoveAmprLeftovers { get; set; } = true;
 
+    /// <summary>Bỏ tàn dư của bản dump (_DUBLEX_, thư mục Saved của Unreal) khỏi gói.</summary>
+    public bool RemoveDumpLeftovers { get; set; } = true;
+
     /// <summary>Đã hỏi "cài Dokan để gắn ảnh trực tiếp?" một lần rồi (Windows) — không hỏi lại.</summary>
     public bool DokanPromptShown { get; set; }
 

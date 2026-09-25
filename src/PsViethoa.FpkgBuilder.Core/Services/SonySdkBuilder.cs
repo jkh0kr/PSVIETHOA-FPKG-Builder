@@ -14,7 +14,7 @@ namespace PsViethoa.FpkgBuilder.Core.Services;
 public sealed record SonySdkBuildResult(string OutputPath, string ProjectPath, string LogFolder, IReadOnlyList<string> Warnings, SonySdkConversionReport? Report, string? RemasteredPath = null);
 
 /// <summary>
-/// Tạo gói theo chuẩn của bộ sdk-fpkg729-fix (profile <c>sdk279-plaintext-unsigned-v2</c>), đúng ba bước và đúng tên tệp của
+/// Tạo gói theo chuẩn của bộ sdk-fpkg279-fix12 (profile <c>sdk279-plaintext-direct-v3</c>), đúng các bước và đúng tên tệp của
 /// <c>build-from-folder.ps1</c>: [1/3] <c>&lt;tên&gt;.gp5</c> + <c>&lt;tên&gt;.playgo-scenario.json</c> trong thư mục xuất, [2/3]
 /// Publishing Tools 2.79 đã vá tạo <c>&lt;tên&gt;.sdk-plaintext.pkg</c> (<c>img_create --oformat nwonly</c>), [3/3] chuyển sang gói
 /// tương thích LibProsperoPkg (PLAINTEXT_NOAUTH) rồi bỏ gói thô. GP5, scenario và thư mục <c>&lt;tên&gt;-build-logs</c> được giữ lại
@@ -204,7 +204,17 @@ public static class SonySdkBuilder
             BuildEngine.TryDeleteDirectory(assetsFolder);
             Directory.CreateDirectory(logFolder);
 
-            // [1/3] GP5 + scenario mặc định
+            // [1/3] GP5 + scenario. Như build-from-folder.ps1 của fix12: gói đầy đủ tự chọn attributePub (--auto-size-profile sdk279);
+            // bản vá giữ attributePub của nguồn vì kích thước phần vá không quyết định được kích thước gói remastered.
+            if (referencePath == null)
+            {
+                plan = plan with { AutoSizeProfile = SonySdkPackageSize.Sdk279 };
+            }
+            else
+            {
+                log(new LogEntry(LogLevel.Info, Loc.T("Sdk.AutoSizeReference")));
+            }
+
             progress(PhaseCatalog.SdkProject, 0, null);
             var project = await Task.Run(
                 () => SonySdkProject.Create(
@@ -239,8 +249,27 @@ public static class SonySdkBuilder
             foreach (var png in project.RecoveredPngs)
             {
                 log(png.ReplacedInvalid
-                    ? new LogEntry(LogLevel.Warning, Loc.F("Sdk.PngInvalidRecovered", png.Destination, png.DdsName))
-                    : new LogEntry(LogLevel.Info, Loc.F("Sdk.PngRecovered", png.Destination, png.DdsName)));
+                    ? new LogEntry(LogLevel.Warning, Loc.F("Sdk.PngInvalidRecovered", png.Destination, png.DdsName, png.Mode))
+                    : new LogEntry(LogLevel.Info, Loc.F("Sdk.PngRecovered", png.Destination, png.DdsName, png.Mode)));
+            }
+
+            if (project.RepairedSelfs.Count > 0)
+            {
+                log(new LogEntry(LogLevel.Info, Loc.F("Sdk.SelfRepaired", project.RepairedSelfs.Count, Summarize(project.RepairedSelfs.Select(item => item.Relative + " (" + item.Repairs + ")").ToList()))));
+            }
+
+            if (project.SizeSelection is { } size)
+            {
+                log(new LogEntry(LogLevel.Info, Loc.F("Sdk.PackageSize", Formatters.Size(project.SizeInputs.Bytes), project.SizeInputs.Files.ToString("N0", CultureInfo.CurrentCulture), Formatters.Size(size.EstimatedBytes), size.AttributePub, size.MountLevel)));
+                if (size.MountLevel != project.OriginalMountLevel)
+                {
+                    log(new LogEntry(LogLevel.Warning, Loc.F("Sdk.MountLevelLowered", project.OriginalMountLevel, size.MountLevel)));
+                }
+
+                if (size.EstimatedBytes > SonySdkPackageSize.ProfileLimit(SonySdkPackageSize.Sdk279))
+                {
+                    log(new LogEntry(LogLevel.Warning, Loc.F("Sdk.PackageSizeOverLimit", Formatters.Size(size.EstimatedBytes), Formatters.Size(SonySdkPackageSize.ProfileLimit(SonySdkPackageSize.Sdk279)))));
+                }
             }
 
             if (plan.PlayGo is { IsTrivial: false } structure)

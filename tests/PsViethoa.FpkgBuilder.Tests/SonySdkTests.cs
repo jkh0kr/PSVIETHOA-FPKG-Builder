@@ -61,7 +61,7 @@ public sealed class SonySdkTests : IDisposable
 
         File.WriteAllBytes(Path.Combine(folder, "sce_sys", "playgo-chunk.dat"), new byte[64]);
         File.WriteAllBytes(Path.Combine(folder, "sce_sys", "icon0.dds"), new byte[16]);
-        File.WriteAllBytes(Path.Combine(folder, "sce_sys", "icon0.png"), new byte[16]);
+        File.WriteAllBytes(Path.Combine(folder, "sce_sys", "icon0.png"), SonySdkFidelityTests.PngHeader(2));
         File.WriteAllBytes(Path.Combine(folder, "sce_sys", "about", "right.sprx"), new byte[16]);
         File.WriteAllBytes(Path.Combine(folder, "ampr_emu.index"), new byte[8]);
         File.WriteAllBytes(Path.Combine(folder, ".DS_Store"), new byte[8]);
@@ -278,6 +278,7 @@ public sealed class SonySdkTests : IDisposable
         var source = MakeSource("build");
         // Publishing Tools kiểm tra định dạng PNG thật — ảnh giả của MakeSource chỉ dùng cho phép thử chọn tệp.
         File.Delete(Path.Combine(source, "sce_sys", "icon0.png"));
+        File.Delete(Path.Combine(source, "sce_sys", "icon0.dds"));
         var paramPath = Path.Combine(source, "sce_sys", "param.json");
         var original = File.ReadAllBytes(paramPath);
         var log = new List<LogEntry>();
@@ -309,7 +310,10 @@ public sealed class SonySdkTests : IDisposable
         var logNames = Directory.EnumerateFiles(logs).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToList();
         Assert.Equal(["01-create-gp5.log", "02-img-create.log"], logNames.Take(2));
         Assert.True(logNames.Count == 2 || (logNames.Count == 3 && logNames[2] == "03-postprocess.log"));
-        Assert.StartsWith("Created " + SonySdkProject.RealPath(Path.Combine(request.OutputFolder, stem + ".gp5")) + " with ", File.ReadAllText(Path.Combine(logs, "01-create-gp5.log")));
+        // fix12: gói đầy đủ in dòng chọn cỡ gói (--auto-size-profile sdk279) trước dòng "Created".
+        var createLog = File.ReadAllText(Path.Combine(logs, "01-create-gp5.log"));
+        Assert.StartsWith("Unpacked GP5 inputs: ", createLog);
+        Assert.Contains("; addcontMountLevel=0; attributePub=0\nCreated " + SonySdkProject.RealPath(Path.Combine(request.OutputFolder, stem + ".gp5")) + " with ", createLog);
         var imageLog = File.ReadAllLines(Path.Combine(logs, "02-img-create.log"));
         Assert.StartsWith("command=img_create --oformat nwonly ", imageLog[0]);
         Assert.Equal(["started_utc", "finished_utc", "elapsed", "exit_code"], imageLog.Skip(1).Take(4).Select(line => line.Split('=')[0]));
@@ -342,6 +346,7 @@ public sealed class SonySdkTests : IDisposable
         {
             var source = MakeSource(name);
             File.Delete(Path.Combine(source, "sce_sys", "icon0.png"));
+            File.Delete(Path.Combine(source, "sce_sys", "icon0.dds"));
             return new BuildRequest
             {
                 SourcePath = source,
@@ -386,6 +391,7 @@ public sealed class SonySdkTests : IDisposable
         foreach (var source in new[] { survivor, victim })
         {
             File.Delete(Path.Combine(source, "sce_sys", "icon0.png"));
+            File.Delete(Path.Combine(source, "sce_sys", "icon0.dds"));
         }
 
         // Nạn nhân có nhiều dữ liệu hơn để chắc chắn còn đang trong img_create lúc bị huỷ.
@@ -440,6 +446,7 @@ public sealed class SonySdkTests : IDisposable
 
         var source = MakeSource("splash", drm: "free");
         File.Delete(Path.Combine(source, "sce_sys", "icon0.png"));
+        File.Delete(Path.Combine(source, "sce_sys", "icon0.dds"));
         using (var gz = new System.IO.Compression.GZipStream(File.OpenRead(Path.Combine(AppContext.BaseDirectory, "Fixtures", "bc7-icon0.dds.gz")), System.IO.Compression.CompressionMode.Decompress))
         using (var dds = File.Create(Path.Combine(source, "sce_sys", "pic0.dds")))
         {
@@ -470,41 +477,57 @@ public sealed class SonySdkTests : IDisposable
         var cnt = PackageReader.ExportCntEntries(outcome.OutputPath, Path.Combine(_root, "cnt-splash"), Passcode, CancellationToken.None);
         Assert.Contains(cnt, name => name.EndsWith("pic0.png", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(cnt, name => name.EndsWith("license.dat", StringComparison.OrdinalIgnoreCase));
-        Assert.StartsWith("Recovering sce_sys/pic0.png from pic0.dds...\n", File.ReadAllText(Path.Combine(request.OutputFolder, stem + "-build-logs", "01-create-gp5.log")));
+        Assert.StartsWith("Converting sce_sys/pic0.dds to pic0.png (RGB)...\n", File.ReadAllText(Path.Combine(request.OutputFolder, stem + "-build-logs", "01-create-gp5.log")));
     }
 
-    /// <summary>Gói giải nén ra có thể mang pic2.png vài trăm byte rác: bỏ khỏi GP5 và khôi phục từ pic2.dds thay vì để SDK dừng.</summary>
+    /// <summary>
+    /// Gói giải nén ra có thể mang pic2.png vài trăm byte rác, hay pic0.png có kênh alpha: fix12 bỏ PNG sai chế độ màu khỏi GP5 và chuyển
+    /// lại từ DDS cùng tên (pic2 giữ alpha, pic0 RGB). PNG trình bày sai màu mà không có DDS thì dừng với lỗi rõ ràng.
+    /// </summary>
     [Fact]
-    public void Project_ReplacesAnInvalidSplashPngWithTheDdsRecovery()
+    public void Project_ReplacesSplashPngsWithTheWrongColorModeFromTheirDds()
     {
         var source = MakeSource("bad-png");
         File.Delete(Path.Combine(source, "sce_sys", "icon0.dds"));
-        File.WriteAllBytes(Path.Combine(source, "sce_sys", "icon0.png"), MinimalPng());
+        File.WriteAllBytes(Path.Combine(source, "sce_sys", "icon0.png"), MinimalPng(2));
         File.WriteAllBytes(Path.Combine(source, "sce_sys", "pic2.png"), Enumerable.Range(0, 532).Select(i => (byte)(i * 7)).ToArray());
         File.WriteAllBytes(Path.Combine(source, "sce_sys", "pic2.dds"), new byte[148]);
-        Assert.False(SonySdkProject.IsValidPresentationPng(Path.Combine(source, "sce_sys", "pic2.png")));
-        Assert.True(SonySdkProject.IsValidPresentationPng(Path.Combine(source, "sce_sys", "icon0.png")));
-        Assert.Equal(["pic2.png"], SonySdkProject.MissingPresentationPngs(source).Select(item => item.PngName));
+        File.WriteAllBytes(Path.Combine(source, "sce_sys", "pic0.png"), MinimalPng(6));
+        File.WriteAllBytes(Path.Combine(source, "sce_sys", "pic0.dds"), new byte[148]);
+        Assert.Null(SonySdkProject.PngColorType(Path.Combine(source, "sce_sys", "pic2.png")));
+        Assert.Equal(2, SonySdkProject.PngColorType(Path.Combine(source, "sce_sys", "icon0.png")));
 
         var projectPath = Path.Combine(_root, "bad-png-out", ContentId + "-A0100-V0100.gp5");
+        var calls = new List<(string Dds, bool Alpha)>();
         var result = SonySdkProject.Create(source, projectPath, Passcode, path => path, ddsConverter: (dds, png, preserveAlpha) =>
         {
-            Assert.EndsWith("pic2.dds", dds, StringComparison.Ordinal);
-            Assert.True(preserveAlpha);
-            File.WriteAllBytes(png, MinimalPng());
+            lock (calls)
+            {
+                calls.Add((Path.GetFileName(dds), preserveAlpha));
+            }
+
+            File.WriteAllBytes(png, MinimalPng(preserveAlpha ? (byte)6 : (byte)2));
         });
 
-        var recovered = Assert.Single(result.RecoveredPngs);
-        Assert.Equal("sce_sys/pic2.png", recovered.Destination);
-        Assert.True(recovered.ReplacedInvalid);
-        Assert.Contains(result.Excluded, line => line.StartsWith("sce_sys/pic2.png (not a valid PNG", StringComparison.Ordinal));
+        Assert.Equal([("pic0.dds", false), ("pic2.dds", true)], calls.OrderBy(call => call.Dds, StringComparer.Ordinal));
+        Assert.Equal(["sce_sys/pic0.png", "sce_sys/pic2.png"], result.RecoveredPngs.Select(png => png.Destination));
+        Assert.All(result.RecoveredPngs, png => Assert.True(png.ReplacedInvalid));
+        Assert.Equal(["RGB", "RGBA"], result.RecoveredPngs.Select(png => png.Mode));
+        Assert.Contains("sce_sys/pic2.png (invalid PNG color mode; replaced from DDS)", result.Excluded);
+        Assert.Contains("sce_sys/pic0.png (invalid PNG color mode; replaced from DDS)", result.Excluded);
         var gp5 = File.ReadAllText(projectPath);
+        var recovered = result.RecoveredPngs[1];
         Assert.Contains("dst_path=\"sce_sys/pic2.png\" src_path=\"" + SonySdkProject.EscapeAttribute(recovered.PngPath) + "\"", gp5);
         Assert.DoesNotContain(SonySdkProject.EscapeAttribute(Path.Combine(source, "sce_sys", "pic2.png")), gp5);
+
+        // icon0.png RGBA mà không có icon0.dds: không sửa được → dừng trước khi gọi SDK.
+        File.WriteAllBytes(Path.Combine(source, "sce_sys", "icon0.png"), MinimalPng(6));
+        var error = Assert.Throws<InvalidDataException>(() => SonySdkProject.Create(source, Path.Combine(_root, "bad-png-out2", "x.gp5"), Passcode, path => path, ddsConverter: (_, png, alpha) => File.WriteAllBytes(png, MinimalPng(alpha ? (byte)6 : (byte)2))));
+        Assert.Contains("sce_sys/icon0.png", error.Message);
     }
 
-    /// <summary>PNG 1×1 RGBA hợp lệ (IHDR 8 bit, màu 6, không interlace).</summary>
-    private static byte[] MinimalPng()
+    /// <summary>PNG 1×1 hợp lệ (IHDR 8 bit, không interlace): màu 6 = RGBA, 2 = RGB.</summary>
+    private static byte[] MinimalPng(byte colorType = 6)
     {
         static byte[] Chunk(string type, byte[] data)
         {
@@ -528,11 +551,11 @@ public sealed class SonySdkTests : IDisposable
             return ~crc;
         }
 
-        var ihdr = new byte[] { 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0 };
+        var ihdr = new byte[] { 0, 0, 0, 1, 0, 0, 0, 1, 8, colorType, 0, 0, 0 };
         using var idat = new MemoryStream();
         using (var zlib = new System.IO.Compression.ZLibStream(idat, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true))
         {
-            zlib.Write(new byte[] { 0, 255, 0, 0, 255 });
+            zlib.Write(colorType == 6 ? new byte[] { 0, 255, 0, 0, 255 } : [0, 255, 0, 0]);
         }
 
         return new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }
@@ -625,6 +648,7 @@ public sealed class SonySdkTests : IDisposable
 
         var source = MakeSource("Ghost of Yōtei 格雷克", drm: "standard");
         File.Delete(Path.Combine(source, "sce_sys", "icon0.png"));
+        File.Delete(Path.Combine(source, "sce_sys", "icon0.dds"));
         var log = new List<LogEntry>();
         var request = new BuildRequest
         {

@@ -35,13 +35,21 @@ public sealed record SonySdkSourcePlan(IReadOnlySet<string> Skip, IReadOnlyDicti
     /// </summary>
     public IReadOnlyCollection<string>? OverlayBasePaths { get; init; }
 
+    /// <summary>
+    /// <c>--auto-size-profile</c> của script fix12 (<see cref="SonySdkPackageSize.Sdk279"/>): tự chọn attributePub (và hạ
+    /// kernel.addcontMountLevel khi cần) theo kích thước chưa nén của các tệp trong GP5. build-from-folder.ps1 bật cho gói đầy đủ, tắt
+    /// cho bản vá (giữ attributePub của nguồn). Null = không chọn (như script chạy không có cờ này).
+    /// </summary>
+    public string? AutoSizeProfile { get; init; }
+
     /// <summary>Đúng như script gốc: không bỏ, không thay, không sửa gì ngoài applicationDrmType.</summary>
     public static readonly SonySdkSourcePlan Pure = new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), false);
 }
 
-/// <summary>Ảnh PNG khôi phục từ DDS: đích trong gói (sce_sys/pic0.png), tên tệp DDS nguồn và tệp PNG đã ghi.</summary>
-/// <param name="ReplacedInvalid">PNG có trong nguồn nhưng hỏng (không phải PNG / định dạng SDK không nhận) nên bị thay bằng bản khôi phục từ DDS.</param>
-public sealed record SonySdkRecoveredPng(string Destination, string DdsName, string PngPath, bool ReplacedInvalid = false);
+/// <summary>Ảnh PNG chuyển từ DDS: đích trong gói (sce_sys/pic0.png), tên tệp DDS nguồn và tệp PNG đã ghi.</summary>
+/// <param name="ReplacedInvalid">PNG có trong nguồn nhưng sai chế độ màu SDK yêu cầu (hoặc không phải PNG) nên bị thay bằng bản chuyển từ DDS.</param>
+/// <param name="Mode">"RGB" (icon0/pic0/pic1) hoặc "RGBA" (pic2 và ảnh khác, giữ kênh alpha).</param>
+public sealed record SonySdkRecoveredPng(string Destination, string DdsName, string PngPath, bool ReplacedInvalid = false, string Mode = "RGB");
 
 /// <summary>Kết quả tạo dự án GP5 cho SDK Sony.</summary>
 /// <param name="ProjectPath">Tệp .gp5 vừa ghi.</param>
@@ -84,6 +92,21 @@ public sealed record SonySdkProjectResult(
     /// <summary>Thư mục update: tệp mới chỉ có trong thư mục update.</summary>
     public IReadOnlyList<string> OverlayAdded { get; init; } = Array.Empty<string>();
 
+    /// <summary>Tệp SELF đã sửa header (đường dẫn trong gói, mô tả cách sửa) — bản sửa nằm trong .gp5-assets/&lt;tên&gt;/normalized-self.</summary>
+    public IReadOnlyList<(string Relative, string Repairs)> RepairedSelfs { get; init; } = Array.Empty<(string, string)>();
+
+    /// <summary>Cỡ gói đã chọn (attributePub…) khi bật <see cref="SonySdkSourcePlan.AutoSizeProfile"/>; null khi không chọn.</summary>
+    public SonySdkSizeSelection? SizeSelection { get; init; }
+
+    /// <summary>Kích thước chưa nén và số tệp dùng để chọn cỡ gói (<see cref="SizeSelection"/>).</summary>
+    public (long Bytes, int Files) SizeInputs { get; init; }
+
+    /// <summary>addcontMountLevel của param.json nguồn (trước khi chọn cỡ gói).</summary>
+    public int OriginalMountLevel { get; init; }
+
+    /// <summary>Các dòng script in ra trước dòng "Created …" (chuyển DDS, sửa SELF, chọn cỡ gói), đúng thứ tự.</summary>
+    public IReadOnlyList<string> ScriptLines { get; init; } = Array.Empty<string>();
+
 
     /// <summary>Đầu ra chuẩn của create-gp5-from-folder.py cho lượt này (ghi vào 01-create-gp5.log như build-from-folder.ps1).</summary>
     public string Report
@@ -91,9 +114,9 @@ public sealed record SonySdkProjectResult(
         get
         {
             var builder = new StringBuilder();
-            foreach (var png in RecoveredPngs)
+            foreach (var line in ScriptLines)
             {
-                builder.Append("Recovering ").Append(png.Destination).Append(" from ").Append(png.DdsName).Append("...\n");
+                builder.Append(line).Append('\n');
             }
 
             builder.Append("Created ").Append(ProjectPath).Append(" with ").Append(FileCount).Append(" explicit file mapping(s).\n");
@@ -141,12 +164,14 @@ public sealed record SonySdkProjectResult(
 
 /// <summary>
 /// Tạo dự án GP5 "phẳng" từ một thư mục ứng dụng, giống từng byte với <c>scripts/create-gp5-from-folder.py</c> của bộ
-/// sdk-fpkg279-fixdss3 (chế độ <c>--keep-keystone --absolute-paths</c> mà build-from-folder.ps1 dùng): mọi tệp được liệt kê tường
+/// sdk-fpkg279-fix12 (chế độ <c>--keep-keystone --absolute-paths --chunk-count N [--auto-size-profile sdk279]</c> mà
+/// build-from-folder.ps1 dùng): mọi tệp được liệt kê tường
 /// minh (không dùng rootdir) để tàn dư của lần giải nén/đóng gói trước không lọt vào gói; các tệp sce_sys do SDK tự sinh (PlayGo,
 /// pfs-version, license giả, ảnh .dds, about/…) bị loại để SDK tạo lại; <c>ampr_emu.index</c> và hai module giả lập
 /// <c>fakelib/libSceAmpr.sprx</c>, <c>fakelib/libScePlayGo.sprx</c> bị loại; keystone 96 byte của nguồn luôn được giữ (SDK đã vá
-/// nhận keystone này thay vì tự tạo từ passcode). param.json được chuẩn hoá với applicationDrmType = "standard" và ảnh
-/// <c>sce_sys/pic*.png</c> thiếu được khôi phục từ <c>.dds</c> vào thư mục <c>.gp5-assets/&lt;tên&gt;/sce_sys</c> cạnh GP5; nguồn không
+/// nhận keystone này thay vì tự tạo từ passcode); thư mục <c>sce_suppl</c>/<c>sce_sc</c> ở gốc bị loại (SDK giữ riêng). param.json được
+/// chuẩn hoá với applicationDrmType = "standard" (và attributePub tự chọn), ảnh <c>sce_sys/*.png</c> thiếu hoặc sai chế độ màu được
+/// chuyển từ <c>.dds</c>, tệp SELF lệch header được sửa — tất cả vào thư mục <c>.gp5-assets/&lt;tên&gt;</c> cạnh GP5; nguồn không
 /// bao giờ bị sửa. Thứ tự tệp = <c>sorted(name.casefold())</c> của Python vì Publishing Tools xếp dữ liệu vào ảnh theo đúng thứ tự
 /// trong GP5 (đảo thứ tự là gói khác hẳn).
 /// </summary>
@@ -182,10 +207,17 @@ public static partial class SonySdkProject
         "license.info",
         "license.dat",
         // Bản gốc/đích của param.json mà Publishing Tools cất trong CNT của gói (bản vá/backport); chế độ Giải nén chép chúng ra
-        // sce_sys, đưa lại vào GP5 thì SDK từ chối "reserved node found" (đo 2026-09-18; script gốc thiếu hai tên này).
+        // sce_sys, đưa lại vào GP5 thì SDK từ chối "reserved node found" (đo 2026-09-18; script fix12 đã thêm hai tên này).
         "origin-param.json",
         "target-param.json",
+        // fix12: gợi ý vùng nén PFS và bảng relocation của bản vá cũng là đầu ra của SDK.
+        "pfs-region-hints.json",
+        "origin-relocinfo.dat",
+        "target-relocinfo.dat",
     };
+
+    /// <summary><c>GENERATED_ROOT_DIRECTORIES</c> (fix12): thư mục ở gốc mà Publishing Tools giữ riêng, bản giải nén có thể mang theo.</summary>
+    private static readonly HashSet<string> GeneratedRootDirectories = new(StringComparer.Ordinal) { "sce_suppl", "sce_sc" };
 
     private static readonly HashSet<string> GeneratedSceSysDirectories = new(StringComparer.OrdinalIgnoreCase) { "about" };
 
@@ -359,19 +391,19 @@ public static partial class SonySdkProject
         walker.Walk(walker.Root);
         listed?.Invoke(walker.Files.Count);
 
-        var paramIndex = walker.Files.FindIndex(file => file.Relative.Equals("sce_sys/param.json", StringComparison.OrdinalIgnoreCase));
-        if (paramIndex < 0)
-        {
-            throw new InvalidDataException(Loc.T("Sdk.ParamMissing"));
-        }
-
-        var paramSource = walker.Files[paramIndex].FullPath;
+        var files = walker.Files;
+        var paramSource = files.Find(file => file.Relative.Equals("sce_sys/param.json", StringComparison.OrdinalIgnoreCase)).FullPath
+                          ?? throw new InvalidDataException(Loc.T("Sdk.ParamMissing"));
         var (contentId, language) = ReadParam(paramSource);
+
+        // Ảnh trình bày (trước write_scenario như script): DDS nào cần chuyển vì PNG thiếu/sai chế độ màu; PNG sai bị bỏ khỏi GP5.
+        var conversions = PlanPresentationImages(walker.Root, files, walker.Excluded, plan.SkipJunk);
+
         var scenarioPath = Path.ChangeExtension(projectPath, ".playgo-scenario.json");
         var projectFolder = Path.GetDirectoryName(projectPath)!;
         Directory.CreateDirectory(projectFolder);
         var playGo = plan.PlayGo is { IsTrivial: false } structure ? structure : null;
-        // Bố cục script fix6 (không có bảng gốc): scenario JSON do write_scenario() tạo. Bảng gốc nhiều chunk: Publishing Tools chép
+        // Bố cục script (không có bảng gốc): scenario JSON do write_scenario() tạo. Bảng gốc nhiều chunk: Publishing Tools chép
         // nguyên playgo-scenario.json vào gói, nên dùng lại đúng tệp của gói gốc (tiêu đề, mô tả, danh sách ngôn ngữ) khi nó khớp cấu
         // trúc; không có/không khớp thì tạo từ nhãn kịch bản. 1 chunk (tuỳ chọn dự phòng tắt): kịch bản mặc định.
         var originalScenario = playGo is null or { ScriptLayout: true } ? null : OriginalScenarioJson(Path.Combine(walker.Root, "sce_sys", SonySdkPlayGo.ScenarioFileName), playGo);
@@ -388,20 +420,16 @@ public static partial class SonySdkProject
             WriteScriptText(scenarioPath, playGo == null ? DefaultScenario(language) : ScenarioJson(playGo, language));
         }
 
-        // .gp5-assets/<tên>/sce_sys: param.json chuẩn hoá (write_standard_param) + PNG khôi phục (recover_presentation_pngs).
+        // .gp5-assets/<tên>: sce_sys/param.json chuẩn hoá, sce_sys/*.png chuyển từ DDS, normalized-self/, playgo-languages/.
         var generatedSystem = Path.Combine(projectFolder, AssetsFolderName, Path.GetFileNameWithoutExtension(projectPath), "sce_sys");
+        var generatedRoot = Path.GetDirectoryName(generatedSystem)!;
         Directory.CreateDirectory(generatedSystem);
         var generatedParam = Path.Combine(generatedSystem, "param.json");
-        var paramChanges = WriteStandardParam(paramSource, generatedParam, plan.ParamPatch);
-        var recovered = RecoverPresentationPngs(walker.Root, generatedSystem, ddsConverter, cancellationToken);
-        if (overlayRoot != null)
-        {
-            // Thư mục update đã mang sẵn ảnh đó thì không thêm bản khôi phục từ .dds của gói gốc (trùng dst_path).
-            recovered = recovered.Where(png => !walker.Files.Any(file => file.Relative.Equals(png.Destination, StringComparison.OrdinalIgnoreCase))).ToList();
-        }
+        var scriptLines = new List<string>();
+        var recovered = ConvertDdsImages(conversions, generatedSystem, ddsConverter, scriptLines, cancellationToken);
+        var repairs = PrepareExecutableInputs(files, generatedRoot, scriptLines, cancellationToken);
 
-        // write_language_payloads(): tệp giữ chỗ 1 MiB (không nén) cho từng chunk ngôn ngữ trong .gp5-assets/<tên>/playgo-languages/.
-        var generatedRoot = Path.GetDirectoryName(generatedSystem)!;
+        // write_language_payloads(): tệp giữ chỗ 1 MiB (không nén) cho từng ngôn ngữ trong .gp5-assets/<tên>/playgo-languages/.
         var payloads = playGo?.LanguagePayloads ?? Array.Empty<PlayGoLanguagePayload>();
         var payloadPaths = new List<string>(payloads.Count);
         foreach (var payload in payloads)
@@ -417,8 +445,50 @@ public static partial class SonySdkProject
             payloadPaths.Add(payloadPath);
         }
 
+        // --auto-size-profile: cỡ gói từ kích thước chưa nén của mọi tệp GP5 trỏ tới (param.json chuẩn hoá tính vào phần dự phòng).
+        SonySdkSizeSelection? selection = null;
+        var sizeInputs = (Bytes: 0L, Files: 0);
+        var originalMountLevel = 0;
+        if (plan.AutoSizeProfile is { } profile)
+        {
+            long unpacked = 0;
+            var mappedCount = 0;
+            for (var index = 0; index < files.Count; index++)
+            {
+                if (string.Equals(files[index].FullPath, paramSource, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                unpacked += repairs.TryGetValue(index, out var repaired) ? new FileInfo(repaired.Path).Length : files[index].Length;
+                mappedCount++;
+            }
+
+            unpacked += recovered.Sum(png => new FileInfo(png.PngPath).Length) + payloadPaths.Sum(path => new FileInfo(path).Length) + new FileInfo(scenarioPath).Length;
+            mappedCount += recovered.Count + payloadPaths.Count + 1;
+            sizeInputs = (unpacked, mappedCount + 1);
+            originalMountLevel = SonySdkPackageSize.ReadMountLevel(ParseParamObject(paramSource), paramSource);
+            selection = SonySdkPackageSize.Choose(unpacked, mappedCount + 1, profile, originalMountLevel);
+            if (selection.MountLevel != originalMountLevel)
+            {
+                scriptLines.Add($"[Warn] Adjusting kernel.addcontMountLevel from {originalMountLevel} to {selection.MountLevel} in the generated param.json; the source file is unchanged.");
+            }
+
+            var limit = SonySdkPackageSize.ProfileLimit(profile);
+            if (selection.EstimatedBytes > limit)
+            {
+                var maximum = profile == SonySdkPackageSize.Sdk279 ? "attributePub=2 (lv2)" : "attributePub=4 (lv3), appSizeInGib=320";
+                scriptLines.Add($"[Warn] Conservative estimate {selection.EstimatedBytes} bytes exceeds the maximum declared size for {profile}: {limit} bytes. Continuing with {maximum}; img_create will apply the final limit after compression.");
+            }
+
+            var detail = selection.AppSizeInGib is { } gib ? $", appSizeInGib={gib}" : string.Empty;
+            scriptLines.Add($"Unpacked GP5 inputs: {unpacked} bytes, {mappedCount + 1} files; conservative estimate: {selection.EstimatedBytes} bytes; addcontMountLevel={selection.MountLevel}; attributePub={selection.AttributePub}{detail}");
+        }
+
+        var paramChanges = WriteStandardParam(paramSource, generatedParam, plan.ParamPatch, selection);
+
         // Cùng bố cục với ElementTree của Python (khai báo nháy đơn, thụt 2 khoảng trắng, " />" cho phần tử rỗng, không xuống dòng cuối).
-        var xml = new StringBuilder(512 + walker.Files.Count * 160);
+        var xml = new StringBuilder(512 + files.Count * 160);
         xml.Append("<?xml version='1.0' encoding='utf-8'?>\n");
         xml.Append("<psproject fmt=\"gp5\">\n");
         xml.Append("  <volume>\n");
@@ -437,13 +507,13 @@ public static partial class SonySdkProject
         }
         else
         {
-            // Cấu trúc chunk/kịch bản/ngôn ngữ của gói gốc (Publishing Tools tự ghi đúng cú pháp này qua gp5_chunk_add/gp5_scenario_add).
+            // Cấu trúc chunk/kịch bản/ngôn ngữ (bố cục script hoặc của gói gốc — Publishing Tools tự ghi đúng cú pháp này qua gp5_chunk_add/gp5_scenario_add).
             xml.Append(SonySdkPlayGo.ChunkInfoXml(playGo));
         }
 
         xml.Append("  </volume>\n");
         xml.Append("  <files>\n");
-        // Bố cục script fix6 ghi chunk="0" tường minh trên mọi tệp; bố cục bảng gốc chỉ ghi chunk khác 0 (chunk 0 là mặc định của SDK).
+        // Bố cục script ghi chunk="0" tường minh trên mọi tệp; bố cục bảng gốc chỉ ghi chunk khác 0 (chunk 0 là mặc định của SDK).
         var explicitChunk = playGo is { ScriptLayout: true };
         AppendFile(xml, "sce_sys/playgo-scenario.json", toolPath(scenarioPath), explicitChunk ? 0 : -1);
         foreach (var png in recovered)
@@ -456,11 +526,10 @@ public static partial class SonySdkProject
             AppendFile(xml, payloads[index].Destination, toolPath(payloadPaths[index]), payloads[index].ChunkId, noCompression: true);
         }
 
-        var written = 0;
         var mapped = 0;
-        for (var index = 0; index < walker.Files.Count; index++)
+        for (var index = 0; index < files.Count; index++)
         {
-            var file = walker.Files[index];
+            var file = files[index];
             // Tệp thuộc chunk khác 0 trong gói gốc: giữ nguyên (gp5_file_add --chunk).
             var chunk = playGo?.ChunkOf(file.Relative) ?? 0;
             if (chunk > 0)
@@ -468,8 +537,11 @@ public static partial class SonySdkProject
                 mapped++;
             }
 
-            AppendFile(xml, file.Relative, toolPath(index == paramIndex ? generatedParam : file.FullPath), explicitChunk || chunk > 0 ? chunk : -1);
-            if (++written % 2000 == 0)
+            var actual = string.Equals(file.FullPath, paramSource, StringComparison.Ordinal)
+                ? generatedParam
+                : repairs.TryGetValue(index, out var repaired) ? repaired.Path : file.FullPath;
+            AppendFile(xml, file.Relative, toolPath(actual), explicitChunk || chunk > 0 ? chunk : -1);
+            if ((index + 1) % 2000 == 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
             }
@@ -486,19 +558,24 @@ public static partial class SonySdkProject
             paramChanges,
             recovered,
             contentId,
-            walker.Files.Count + recovered.Count + payloads.Count + 1,
-            walker.Files.Sum(file => file.Length),
+            files.Count + recovered.Count + payloads.Count + 1,
+            files.Sum(file => file.Length),
             walker.Excluded,
             walker.SkippedByApp,
             walker.Replaced,
             mapped,
             originalScenario != null,
-            walker.Files.Where(file => !IsSdkPackagePath(file.Relative)).Select(file => file.Relative).ToList(),
-            walker.Files.Select(file => file.FullPath).ToList())
+            files.Where(file => !IsSdkPackagePath(file.Relative)).Select(file => file.Relative).ToList(),
+            files.Select(file => file.FullPath).ToList())
         {
             PlayGoLanguagePayloads = payloads.Count,
             OverlayReplaced = walker.OverlayReplaced,
             OverlayAdded = walker.OverlayAdded,
+            RepairedSelfs = repairs.OrderBy(pair => pair.Key).Select(pair => (files[pair.Key].Relative, pair.Value.Repairs)).ToList(),
+            SizeSelection = selection,
+            SizeInputs = sizeInputs,
+            OriginalMountLevel = originalMountLevel,
+            ScriptLines = scriptLines,
         };
     }
 
@@ -580,25 +657,20 @@ public static partial class SonySdkProject
     /// ensure_ascii=False) + "\n"; các sửa đổi tuỳ chọn của công cụ (versionFileUri, attribute3, hạ firmware) áp thêm. Trả về
     /// danh sách thay đổi (đã dịch) so với nguồn.
     /// </summary>
-    public static IReadOnlyList<string> WriteStandardParam(string source, string destination, ParamJsonPatchOptions extra)
+    public static IReadOnlyList<string> WriteStandardParam(string source, string destination, ParamJsonPatchOptions extra, SonySdkSizeSelection? selection = null)
     {
-        JsonObject node;
-        try
-        {
-            node = JsonNode.Parse(File.ReadAllBytes(source), documentOptions: new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip }) as JsonObject
-                   ?? throw new InvalidDataException(Loc.F("Sdk.ParamInvalid", source, "JSON object expected"));
-        }
-        catch (JsonException ex)
-        {
-            throw new InvalidDataException(Loc.F("Sdk.ParamInvalid", source, ex.Message), ex);
-        }
-
+        var node = ParseParamObject(source);
         var options = extra with { ForceStandardDrm = true };
         var changes = ParamJsonPatch.ApplyTo(node, options);
         if (node[ParamJsonPatch.DrmField] is not JsonValue drm || !drm.TryGetValue<string>(out var text) || text != ParamJsonPatch.StandardDrm)
         {
             // Trường thiếu hoặc không phải chuỗi: script gốc gán thẳng value["applicationDrmType"] = "standard".
             node[ParamJsonPatch.DrmField] = ParamJsonPatch.StandardDrm;
+        }
+
+        if (selection != null)
+        {
+            SonySdkPackageSize.Apply(node, selection, source);
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
@@ -614,8 +686,63 @@ public static partial class SonySdkProject
     /// </summary>
     public static void WriteScriptText(string path, string text) => File.WriteAllText(path, text.Replace("\n", "\r\n"), new UTF8Encoding(false));
 
-    /// <summary><c>missing_presentation_pngs</c>: pic*.dds trong sce_sys không có PNG cùng tên, theo thứ tự tên đã casefold.</summary>
-    public static IReadOnlyList<(string DdsPath, string PngName)> MissingPresentationPngs(string appFolder)
+    /// <summary>Một ảnh DDS trong sce_sys cần chuyển sang PNG: tệp DDS, tên PNG đích và PNG của nguồn bị thay (nếu có).</summary>
+    public sealed record DdsConversion(string DdsPath, string PngName, bool ReplacesSourcePng);
+
+    [GeneratedRegex("^(?:icon0|pic0|pic1)(?:_[0-9]{2})?$", RegexOptions.CultureInvariant)]
+    private static partial Regex RgbPresentationPattern();
+
+    [GeneratedRegex("^pic2(?:_[0-9]{2})?$", RegexOptions.CultureInvariant)]
+    private static partial Regex RgbaPresentationPattern();
+
+    /// <summary><c>required_png_color_type</c>: 2 (RGB 8 bit) cho icon0/pic0/pic1[_NN], 6 (RGBA 8 bit) cho pic2[_NN], null cho ảnh khác.</summary>
+    public static int? RequiredPngColorType(string name)
+    {
+        var stem = PythonCaseFold.Fold(PythonStem(name));
+        return RgbPresentationPattern().IsMatch(stem) ? 2 : RgbaPresentationPattern().IsMatch(stem) ? 6 : null;
+    }
+
+    /// <summary><c>png_color_type</c>: kiểu màu IHDR của PNG 8 bit; null khi không phải PNG hợp lệ hoặc không phải 8 bit.</summary>
+    public static int? PngColorType(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            using var stream = File.OpenRead(path);
+            Span<byte> header = stackalloc byte[26];
+            if (stream.ReadAtLeast(header, 26, throwOnEndOfStream: false) < 26 || !header[..8].SequenceEqual(PngSignature) ||
+                !header[8..12].SequenceEqual(new byte[] { 0, 0, 0, 0x0D }) || !header[12..16].SequenceEqual("IHDR"u8) || header[24] != 8)
+            {
+                return null;
+            }
+
+            return header[25];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary><c>Path(name).stem</c>: bỏ phần đuôi cuối cùng (tên bắt đầu bằng dấu chấm và không có đuôi khác thì giữ nguyên).</summary>
+    private static string PythonStem(string name)
+    {
+        var dot = name.LastIndexOf('.');
+        return dot > 0 && dot < name.Length - 1 ? name[..dot] : name;
+    }
+
+    /// <summary><c>Path(name).with_suffix(".png").name</c>.</summary>
+    private static string PythonWithPngSuffix(string name) => PythonStem(name) + ".png";
+
+    /// <summary>
+    /// <c>sce_sys_dds_images</c>: mọi tệp *.dds (không phân biệt hoa thường) ngay trong sce_sys, sắp theo tên đã casefold, kèm tên PNG
+    /// tương ứng; hai DDS cùng ra một PNG là lỗi.
+    /// </summary>
+    public static IReadOnlyList<(string DdsPath, string PngName)> SceSysDdsImages(string appFolder, bool skipJunk = false)
     {
         var system = Path.Combine(appFolder, "sce_sys");
         if (!Directory.Exists(system))
@@ -623,126 +750,130 @@ public static partial class SonySdkProject
             return Array.Empty<(string, string)>();
         }
 
-        var files = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var file in new DirectoryInfo(system).EnumerateFiles())
+        var images = new List<(string, string)>();
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var file in new DirectoryInfo(system).EnumerateFiles()
+                     .Where(file => !skipJunk || !JunkFileFinder.IsJunkFileName(file.Name))
+                     .Select(file => (File: file, Key: PythonCaseFold.Fold(file.Name)))
+                     .OrderBy(pair => pair.Key, Comparer<string>.Create(PythonCaseFold.CompareCodePoints))
+                     .Select(pair => pair.File))
         {
-            files[PythonCaseFold.Fold(file.Name)] = file.FullName;
-        }
-
-        var missing = new List<(string, string)>();
-        foreach (var name in files.Keys.OrderBy(key => key, Comparer<string>.Create(PythonCaseFold.CompareCodePoints)))
-        {
-            if (!name.StartsWith("pic", StringComparison.Ordinal) || !name.EndsWith(".dds", StringComparison.Ordinal))
+            if (!PythonCaseFold.Fold(Path.GetExtension(file.Name)).Equals(".dds", StringComparison.Ordinal) || PythonStem(file.Name) == file.Name)
             {
                 continue;
             }
 
-            var dds = files[name];
-            var pngName = Path.GetFileNameWithoutExtension(dds) + ".png";
-            // Thiếu PNG, hoặc có mà hỏng (gói giải nén ra đôi khi mang pic2.png vài trăm byte rác): khôi phục từ DDS như script gốc.
-            if (!files.TryGetValue(PythonCaseFold.Fold(pngName), out var png) || !IsValidPresentationPng(png))
+            var pngName = PythonWithPngSuffix(file.Name);
+            if (!names.Add(PythonCaseFold.Fold(pngName)))
             {
-                missing.Add((dds, pngName));
+                throw new InvalidDataException(Loc.F("Sdk.DdsDuplicate", pngName));
             }
+
+            images.Add((file.FullName, pngName));
         }
 
-        return missing;
-    }
-
-    /// <summary>sce_sys/pic*.png (đường dẫn tương đối, không phân biệt hoa thường) — các PNG mà script gốc khôi phục được từ .dds.</summary>
-    public static bool IsPresentationPng(string relative)
-    {
-        var folded = PythonCaseFold.Fold(relative);
-        if (!folded.StartsWith("sce_sys/", StringComparison.Ordinal) || folded.IndexOf('/', "sce_sys/".Length) >= 0)
-        {
-            return false;
-        }
-
-        var name = folded["sce_sys/".Length..];
-        return name.StartsWith("pic", StringComparison.Ordinal) && name.EndsWith(".png", StringComparison.Ordinal);
-    }
-
-    /// <summary>Có .dds cùng tên cạnh PNG (để khôi phục được bằng prospero-dds2png).</summary>
-    private static bool HasDdsSibling(string pngPath)
-    {
-        var folder = Path.GetDirectoryName(pngPath);
-        var stem = PythonCaseFold.Fold(Path.GetFileNameWithoutExtension(pngPath));
-        if (folder == null)
-        {
-            return false;
-        }
-
-        try
-        {
-            return Directory.EnumerateFiles(folder).Any(file => PythonCaseFold.Fold(Path.GetFileName(file)) == stem + ".dds");
-        }
-        catch (Exception)
-        {
-            return false;
-        }
+        return images;
     }
 
     /// <summary>
-    /// PNG mà Publishing Tools chấp nhận: chữ ký PNG, IHDR 8 bit, RGB hoặc RGBA, không interlace. Tệp mang tên .png nhưng không
-    /// phải PNG (rác từ CNT của gói gốc) làm img_create dừng với "Format of the png file is not valid".
+    /// Phần ảnh của <c>build_gp5</c> (fix12): DDS dùng khi PNG cùng tên thiếu hoặc sai chế độ màu SDK yêu cầu; PNG sai bị bỏ khỏi
+    /// <paramref name="files"/> và ghi vào <paramref name="excluded"/> sau các mục của bộ duyệt. PNG trình bày sai màu mà không có DDS để
+    /// sửa thì dừng như script.
     /// </summary>
-    public static bool IsValidPresentationPng(string path)
+    private static IReadOnlyList<DdsConversion> PlanPresentationImages(string appFolder, List<(string Relative, string FullPath, long Length)> files, List<string> excluded, bool skipJunk)
     {
-        try
+        var sourcePngs = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var index = 0; index < files.Count; index++)
         {
-            using var stream = File.OpenRead(path);
-            Span<byte> head = stackalloc byte[33];
-            if (stream.Read(head) < 33 || !head[..8].SequenceEqual(PngSignature) || !head[12..16].SequenceEqual("IHDR"u8))
+            sourcePngs.TryAdd(PythonCaseFold.Fold(files[index].Relative), index);
+        }
+
+        var conversions = new List<DdsConversion>();
+        var replaced = new HashSet<int>();
+        foreach (var (dds, pngName) in SceSysDdsImages(appFolder, skipJunk))
+        {
+            var required = RequiredPngColorType(pngName);
+            if (sourcePngs.TryGetValue(PythonCaseFold.Fold("sce_sys/" + pngName), out var original))
             {
-                return false;
+                if (required == null || PngColorType(files[original].FullPath) == required)
+                {
+                    continue;
+                }
+
+                replaced.Add(original);
+                excluded.Add(files[original].Relative + " (invalid PNG color mode; replaced from DDS)");
             }
 
-            var width = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(head[16..20]);
-            var height = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(head[20..24]);
-            var bitDepth = head[24];
-            var colorType = head[25];
-            var interlace = head[28];
-            return width > 0 && height > 0 && width <= 16384 && height <= 16384 && bitDepth == 8 && colorType is 2 or 6 && interlace == 0;
+            conversions.Add(new DdsConversion(dds, pngName, sourcePngs.ContainsKey(PythonCaseFold.Fold("sce_sys/" + pngName))));
         }
-        catch (Exception)
+
+        if (replaced.Count > 0)
         {
-            return false;
+            var kept = files.Where((_, index) => !replaced.Contains(index)).ToList();
+            files.Clear();
+            files.AddRange(kept);
         }
+
+        foreach (var file in files)
+        {
+            var folded = PythonCaseFold.Fold(file.Relative);
+            if (folded.StartsWith("sce_sys/", StringComparison.Ordinal) && folded.Count(c => c == '/') == 1 &&
+                PythonCaseFold.Fold(Path.GetExtension(file.Relative)) == ".png" &&
+                RequiredPngColorType(file.Relative[(file.Relative.IndexOf('/') + 1)..]) is { } required &&
+                PngColorType(file.FullPath) != required)
+            {
+                throw new InvalidDataException(Loc.F("Sdk.PngWrongMode", file.Relative, required == 2 ? "RGB" : "RGBA"));
+            }
+        }
+
+        return conversions;
     }
 
-    private static IReadOnlyList<SonySdkRecoveredPng> RecoverPresentationPngs(string appFolder, string generatedSystem, Action<string, string, bool>? converter, CancellationToken cancellationToken)
+    /// <summary>
+    /// <c>convert_dds_images</c>: chạy prospero-dds2png cho từng ảnh (song song, kết quả giữ đúng thứ tự), <c>--preserve-alpha</c> trừ ảnh
+    /// cần RGB, và kiểm tra PNG ra đúng chế độ màu. Dòng "Converting …" vào <paramref name="lines"/> theo thứ tự.
+    /// </summary>
+    private static IReadOnlyList<SonySdkRecoveredPng> ConvertDdsImages(IReadOnlyList<DdsConversion> conversions, string generatedSystem, Action<string, string, bool>? converter, List<string> lines, CancellationToken cancellationToken)
     {
-        var missing = MissingPresentationPngs(appFolder);
-        if (missing.Count == 0)
+        if (conversions.Count == 0)
         {
             return Array.Empty<SonySdkRecoveredPng>();
         }
 
         if (converter == null)
         {
-            throw new InvalidOperationException(Loc.F("Sdk.DdsConverterMissing", string.Join(", ", missing.Select(item => "sce_sys/" + Path.GetFileName(item.DdsPath)))));
+            throw new InvalidOperationException(Loc.F("Sdk.DdsConverterMissing", string.Join(", ", conversions.Select(item => "sce_sys/" + Path.GetFileName(item.DdsPath)))));
         }
 
-        // Mỗi ảnh 4K BC7 mất vài giây (prospero-dds2png qua Wine trên macOS/Linux, native trên Windows) và game có thể thiếu
-        // cả chục pic2_XX.png: chạy song song, mỗi lần chuyển là một tiến trình riêng. Kết quả giữ đúng thứ tự của danh sách thiếu
-        // để GP5 và 01-create-gp5.log không đổi so với chạy tuần tự.
         Directory.CreateDirectory(generatedSystem);
-        var recovered = new SonySdkRecoveredPng?[missing.Count];
+        foreach (var conversion in conversions)
+        {
+            var destination = Path.Combine(generatedSystem, conversion.PngName);
+            if (File.Exists(destination) || Directory.Exists(destination))
+            {
+                throw new IOException($"generated PNG already exists: {destination}");
+            }
+
+            lines.Add($"Converting sce_sys/{Path.GetFileName(conversion.DdsPath)} to {conversion.PngName} ({Mode(conversion)})...");
+        }
+
+        // Mỗi ảnh 4K BC7 mất vài giây (qua Wine trên macOS/Linux) và game có thể có cả chục pic2_XX: chạy song song, mỗi lần một tiến trình.
+        var converted = new SonySdkRecoveredPng?[conversions.Count];
         var options = new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 2, 8), CancellationToken = cancellationToken };
         try
         {
-            Parallel.For(0, missing.Count, options, index =>
+            Parallel.For(0, conversions.Count, options, index =>
             {
-                var (dds, pngName) = missing[index];
-                var destination = Path.Combine(generatedSystem, pngName);
-                converter(dds, destination, PythonCaseFold.Fold(Path.GetFileNameWithoutExtension(dds)) == "pic2");
-                if (!File.Exists(destination) || !HasPngSignature(destination))
+                var conversion = conversions[index];
+                var destination = Path.Combine(generatedSystem, conversion.PngName);
+                var alpha = PreserveAlpha(conversion);
+                converter(conversion.DdsPath, destination, alpha);
+                if (PngColorType(destination) != (alpha ? 6 : 2))
                 {
-                    throw new InvalidDataException(Loc.F("Sdk.DdsConvertInvalid", destination));
+                    throw new InvalidDataException(Loc.F("Sdk.DdsConvertInvalid", destination) + " (8-bit " + Mode(conversion) + ")");
                 }
 
-                var existing = Path.Combine(Path.GetDirectoryName(dds)!, pngName);
-                recovered[index] = new SonySdkRecoveredPng("sce_sys/" + pngName, Path.GetFileName(dds), destination, ReplacedInvalid: File.Exists(existing));
+                converted[index] = new SonySdkRecoveredPng("sce_sys/" + conversion.PngName, Path.GetFileName(conversion.DdsPath), destination, conversion.ReplacesSourcePng, Mode(conversion));
             });
         }
         catch (AggregateException ex)
@@ -751,14 +882,59 @@ public static partial class SonySdkProject
             throw ex.InnerExceptions.FirstOrDefault(inner => inner is OperationCanceledException) ?? ex.InnerExceptions[0];
         }
 
-        return recovered.Select(item => item!).ToList();
+        return converted.Select(item => item!).ToList();
+
+        static bool PreserveAlpha(DdsConversion conversion) => RequiredPngColorType(conversion.PngName) is null or 6;
+        static string Mode(DdsConversion conversion) => PreserveAlpha(conversion) ? "RGBA" : "RGB";
     }
 
-    private static bool HasPngSignature(string path)
+    /// <summary>
+    /// <c>prepare_executable_inputs</c>: đọc header mọi tệp của GP5 (song song), SELF cần sửa thì ghi bản sửa vào
+    /// .gp5-assets/&lt;tên&gt;/normalized-self/&lt;đường dẫn&gt; theo thứ tự tệp. Trả về chỉ số tệp → (bản sửa, mô tả).
+    /// </summary>
+    private static Dictionary<int, (string Path, string Repairs)> PrepareExecutableInputs(List<(string Relative, string FullPath, long Length)> files, string generatedRoot, List<string> lines, CancellationToken cancellationToken)
     {
-        using var stream = File.OpenRead(path);
-        Span<byte> head = stackalloc byte[8];
-        return stream.Read(head) == 8 && head.SequenceEqual(PngSignature);
+        var plans = new SelfRepairPlan?[files.Count];
+        var options = new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 2, 8), CancellationToken = cancellationToken };
+        try
+        {
+            Parallel.For(0, files.Count, options, index => plans[index] = files[index].Length < 0x20 ? null : SonySdkSelfRepair.Plan(files[index].FullPath));
+        }
+        catch (AggregateException ex)
+        {
+            throw ex.InnerExceptions.FirstOrDefault(inner => inner is OperationCanceledException) ?? ex.InnerExceptions[0];
+        }
+
+        var repairs = new Dictionary<int, (string, string)>();
+        for (var index = 0; index < files.Count; index++)
+        {
+            if (plans[index] is not { } plan)
+            {
+                continue;
+            }
+
+            var relative = files[index].Relative;
+            var destination = Path.Combine(generatedRoot, SonySdkSelfRepair.FolderName, relative.Replace('/', Path.DirectorySeparatorChar));
+            lines.Add($"Repairing SELF {relative} ({plan.Description})...");
+            SonySdkSelfRepair.Write(files[index].FullPath, destination, plan, cancellationToken);
+            repairs[index] = (destination, plan.Description);
+        }
+
+        return repairs;
+    }
+
+    /// <summary>param.json (utf-8-sig) → JsonObject; lỗi phân tích báo như script.</summary>
+    private static JsonObject ParseParamObject(string source)
+    {
+        try
+        {
+            return JsonNode.Parse(File.ReadAllBytes(source), documentOptions: new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip }) as JsonObject
+                   ?? throw new InvalidDataException(Loc.F("Sdk.ParamInvalid", source, "JSON object expected"));
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException(Loc.F("Sdk.ParamInvalid", source, ex.Message), ex);
+        }
     }
 
     /// <param name="chunk">Thuộc tính <c>chunk</c>; âm = không ghi.</param>
@@ -1039,9 +1215,23 @@ public static partial class SonySdkProject
                     continue;
                 }
 
+                if (isDirectory && prefix.Length == 0 && GeneratedRootDirectories.Contains(PythonCaseFold.Fold(item.Name)))
+                {
+                    // fix12: sce_suppl/sce_sc của bản giải nén — Publishing Tools giữ riêng hai thư mục này.
+                    piece.Excluded.Add(relative + "/ (reserved/SDK-generated directory)");
+                    continue;
+                }
+
                 if (plan.SkipJunk && (isDirectory ? JunkFileFinder.IsJunkDirectoryName(entry.Name) : JunkFileFinder.IsJunkFileName(entry.Name)))
                 {
                     piece.SkippedByApp.Add(relative + (isDirectory ? "/ (OS junk folder)" : " (OS junk file)"));
+                    continue;
+                }
+
+                if (isDirectory && plan.Skip.Contains(relative))
+                {
+                    // Cả thư mục bị bỏ theo tuỳ chọn (tàn dư của bản dump: _DUBLEX_, Saved của Unreal…).
+                    piece.SkippedByApp.Add(relative + "/ (excluded by option)");
                     continue;
                 }
 
@@ -1061,14 +1251,6 @@ public static partial class SonySdkProject
                 if (SkipReason(relative, keep) is { } reason)
                 {
                     piece.Excluded.Add(relative + " (" + reason + ")");
-                    continue;
-                }
-
-                // pic*.png hỏng (không phải PNG) mà có .dds cùng tên: Publishing Tools sẽ từ chối cả gói, nên bỏ khỏi GP5 và thêm bản
-                // khôi phục từ .dds ở bước sau (như thiếu PNG). Không có .dds thì giữ nguyên như script gốc.
-                if (IsPresentationPng(relative) && !IsValidPresentationPng(file.FullName) && HasDdsSibling(file.FullName))
-                {
-                    piece.Excluded.Add(relative + " (not a valid PNG — Publishing Tools rejects it; rebuilt from the .dds copy)");
                     continue;
                 }
 

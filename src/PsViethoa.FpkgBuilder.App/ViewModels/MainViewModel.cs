@@ -734,6 +734,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>Dọn tàn dư AMPR emu (ampr_emu.index) khỏi gói — engine đã luôn bỏ module giả lập.</summary>
     [ObservableProperty] private bool _removeAmprLeftovers = true;
+    [ObservableProperty] private bool _removeDumpLeftovers = true;
 
     /// <summary>Bỏ sce_sys/playgo* của bản dump khỏi gói để thư viện tạo bộ PlayGo mới (mặc định bật, theo Drakmor).</summary>
     [ObservableProperty] private bool _removePlayGoFiles = true;
@@ -1872,6 +1873,7 @@ public sealed partial class MainViewModel : ObservableObject
             ForceStandardDrm = s.ForceStandardDrm;
             UseSonySdk = s.UseSonySdk;
             RemoveAmprLeftovers = s.RemoveAmprLeftovers;
+            RemoveDumpLeftovers = s.RemoveDumpLeftovers;
             RemovePlayGoFiles = s.RemovePlayGoFiles;
             KeepDlcEmu = s.KeepDlcEmu;
             ClearVersionFileUri = s.ClearVersionFileUri;
@@ -1971,6 +1973,7 @@ public sealed partial class MainViewModel : ObservableObject
         s.UseSonySdk = d.UseSonySdk;
         s.RemovePlayGoFiles = d.RemovePlayGoFiles;
         s.RemoveAmprLeftovers = d.RemoveAmprLeftovers;
+        s.RemoveDumpLeftovers = d.RemoveDumpLeftovers;
         s.KeepDlcEmu = d.KeepDlcEmu;
         s.ClearVersionFileUri = d.ClearVersionFileUri;
         s.ClearPlayGoAttributes = d.ClearPlayGoAttributes;
@@ -2034,6 +2037,7 @@ public sealed partial class MainViewModel : ObservableObject
         s.ForceStandardDrm = ForceStandardDrm;
         s.UseSonySdk = UseSonySdk;
         s.RemoveAmprLeftovers = RemoveAmprLeftovers;
+        s.RemoveDumpLeftovers = RemoveDumpLeftovers;
         s.RemovePlayGoFiles = RemovePlayGoFiles;
         s.KeepDlcEmu = KeepDlcEmu;
         s.ClearVersionFileUri = ClearVersionFileUri;
@@ -2742,6 +2746,7 @@ public sealed partial class MainViewModel : ObservableObject
         SdkPlayGoFallback = SdkPlayGoFallback,
         SdkCompressionLevel = SdkLevelFromIndex(SdkCompressionIndex),
         RemoveAmprLeftovers = RemoveAmprLeftovers,
+        RemoveDumpLeftovers = RemoveDumpLeftovers,
         RemovePlayGoFiles = RemovePlayGoFiles,
         KeepDlcEmu = KeepDlcEmu,
         ClearVersionFileUri = ClearVersionFileUri,

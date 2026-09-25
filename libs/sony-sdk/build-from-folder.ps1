@@ -6,12 +6,14 @@
     [string]$Python = "python",
     [string]$TemporaryDirectory = $env:LIBPROSPERO_TEMP_DIR,
     [ValidateRange(-4, 9)][int]$CompressionLevel = 7,
+    [ValidateRange(1, 255)][int]$ChunkCount = 100,
     [switch]$KeepKeystone,
     [switch]$KeepIntermediate,
     [switch]$Force
 )
 $ErrorActionPreference = "Stop"
 $toolkit = [IO.Path]::GetFullPath($PSScriptRoot)
+$autoSizeProfile = "sdk279"
 $source = [IO.Path]::GetFullPath($SourceFolder)
 $final = [IO.Path]::GetFullPath($OutputPackage)
 $reference = $null
@@ -121,7 +123,13 @@ if ($temporaryBuildDirectory) {
 Write-Host "[1/2] Creating GP5: $gp5"
 $gp5Args = @(
     (Join-Path $toolkit "scripts/create-gp5-from-folder.py"),
-    $source, $gp5, "--passcode", $Passcode, "--absolute-paths", "--keep-keystone")
+    $source, $gp5, "--passcode", $Passcode, "--absolute-paths", "--keep-keystone",
+    "--chunk-count", $ChunkCount)
+if (-not $reference) {
+    $gp5Args += @("--auto-size-profile", $autoSizeProfile)
+} else {
+    Write-Host "Reference build: preserving source attributePub; unpacked patch size cannot determine remastered size."
+}
 & $Python @gp5Args 2>&1 |
     Tee-Object -FilePath (Join-Path $logDirectory "01-create-gp5.log")
 if ($LASTEXITCODE -ne 0) { throw "GP5 creation failed with exit code $LASTEXITCODE" }

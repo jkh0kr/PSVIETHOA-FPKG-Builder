@@ -6,7 +6,7 @@ using Xunit;
 namespace PsViethoa.FpkgBuilder.Tests;
 
 /// <summary>
-/// GP5 của công cụ phải giống từng byte với <c>create-gp5-from-folder.py</c> của bộ sdk-fpkg729-fix (thứ tự tệp quyết định bố cục
+/// GP5 của công cụ phải giống từng byte với <c>create-gp5-from-folder.py</c> của bộ sdk-fpkg279-fix12 (thứ tự tệp quyết định bố cục
 /// gói của Publishing Tools). So trực tiếp với script Python khi máy có python3; các phép thử còn lại không cần Python.
 /// </summary>
 public sealed class SonySdkFidelityTests : IDisposable
@@ -56,7 +56,7 @@ public sealed class SonySdkFidelityTests : IDisposable
         File.WriteAllBytes(Path.Combine(source, "sce_sys", "keystone"), new byte[96]);
         File.WriteAllBytes(Path.Combine(source, "sce_sys", "playgo-chunk.dat"), new byte[4]);
         File.WriteAllBytes(Path.Combine(source, "sce_sys", "icon0.dds"), new byte[4]);
-        File.WriteAllBytes(Path.Combine(source, "sce_sys", "icon0.png"), new byte[4]);
+        File.WriteAllBytes(Path.Combine(source, "sce_sys", "icon0.png"), PngHeader(2));
         File.WriteAllBytes(Path.Combine(source, "sce_sys", "about", "right.sprx"), new byte[4]);
         File.WriteAllBytes(Path.Combine(source, "sce_sys", "trophy2", "trophy00.ucp"), new byte[4]);
         File.WriteAllBytes(Path.Combine(source, "eboot.bin"), new byte[16]);
@@ -200,24 +200,27 @@ public sealed class SonySdkFidelityTests : IDisposable
     }
 
     [Fact]
-    public void MissingPresentationPngs_FollowTheScriptRules()
+    public void DdsImagesAndColorModes_FollowTheScriptRules()
     {
         var source = Path.Combine(_root, "pngs", "sce_sys");
         Directory.CreateDirectory(source);
-        foreach (var name in new[] { "pic0.dds", "PIC1.DDS", "pic1.png", "pic2.dds", "icon0.dds", "picture.dds", "pic3.DDS" })
+        foreach (var name in new[] { "pic0.dds", "PIC1.DDS", "pic1.png", "pic2.dds", "icon0.dds", "picture.dds", "pic3.DDS", ".dds", "readme.txt" })
         {
             File.WriteAllBytes(Path.Combine(source, name), new byte[4]);
         }
 
-        // Khác script gốc ở một điểm: pic1.png 4 byte rác (không phải PNG) cũng được khôi phục từ PIC1.DDS thay vì để SDK dừng.
-        var missing = SonySdkProject.MissingPresentationPngs(Path.Combine(_root, "pngs"));
-        Assert.Equal(["pic0.png", "PIC1.png", "pic2.png", "pic3.png", "picture.png"], missing.Select(item => item.PngName));
-        Assert.Equal(["pic0.dds", "PIC1.DDS", "pic2.dds", "pic3.DDS", "picture.dds"], missing.Select(item => Path.GetFileName(item.DdsPath)));
+        // sce_sys_dds_images: mọi *.dds (không chỉ pic*), theo tên đã casefold; ".dds" không có đuôi theo pathlib nên bị bỏ.
+        var images = SonySdkProject.SceSysDdsImages(Path.Combine(_root, "pngs"));
+        Assert.Equal(["icon0.png", "pic0.png", "PIC1.png", "pic2.png", "pic3.png", "picture.png"], images.Select(item => item.PngName));
 
-        // PNG hợp lệ (chữ ký + IHDR 8 bit RGB) thì giữ, đúng quy tắc script.
-        var validHeader = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, (byte)'I', (byte)'H', (byte)'D', (byte)'R', 0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, 0, 0, 0, 0, 0 };
-        File.WriteAllBytes(Path.Combine(source, "pic1.png"), validHeader);
-        Assert.Equal(["pic0.png", "pic2.png", "pic3.png", "picture.png"], SonySdkProject.MissingPresentationPngs(Path.Combine(_root, "pngs")).Select(item => item.PngName));
+        Assert.Equal(2, SonySdkProject.RequiredPngColorType("icon0.png"));
+        Assert.Equal(2, SonySdkProject.RequiredPngColorType("PIC1_05.png"));
+        Assert.Equal(6, SonySdkProject.RequiredPngColorType("pic2_12.png"));
+        Assert.Null(SonySdkProject.RequiredPngColorType("pic2_123.png"));
+        Assert.Null(SonySdkProject.RequiredPngColorType("picture.png"));
+        Assert.Null(SonySdkProject.PngColorType(Path.Combine(source, "pic1.png")));
+        File.WriteAllBytes(Path.Combine(source, "pic1.png"), PngHeader(2));
+        Assert.Equal(2, SonySdkProject.PngColorType(Path.Combine(source, "pic1.png")));
     }
 
     [Fact]
@@ -235,7 +238,7 @@ public sealed class SonySdkFidelityTests : IDisposable
                 calls.Add((Path.GetFileName(dds), png, alpha));
             }
 
-            File.WriteAllBytes(png, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3]);
+            File.WriteAllBytes(png, PngHeader(alpha ? (byte)6 : (byte)2));
         }
 
         var work = SonySdkProject.RealPath(Path.Combine(_root, "rec"));
@@ -245,7 +248,7 @@ public sealed class SonySdkFidelityTests : IDisposable
         var lines = File.ReadAllLines(result.ProjectPath);
         var files = lines.Where(line => line.Contains("<file ", StringComparison.Ordinal)).Select(line => line.Split("dst_path=\"")[1].Split('"')[0]).ToList();
         Assert.Equal(["sce_sys/playgo-scenario.json", "sce_sys/pic0.png", "sce_sys/pic2.png"], files.Take(3));
-        Assert.StartsWith("Recovering sce_sys/pic0.png from pic0.dds...\nRecovering sce_sys/pic2.png from pic2.dds...\nCreated ", result.Report);
+        Assert.StartsWith("Converting sce_sys/pic0.dds to pic0.png (RGB)...\nConverting sce_sys/pic2.dds to pic2.png (RGBA)...\nCreated ", result.Report);
         Assert.Equal(2, result.RecoveredPngs.Count);
 
         // Không có bộ chuyển đổi: lỗi rõ ràng như script gốc, không tạo GP5.
@@ -254,8 +257,42 @@ public sealed class SonySdkFidelityTests : IDisposable
     }
 
     /// <summary>Chạy chính script Python của bộ công cụ (kèm trong libs/sony-sdk) trên cùng cây tệp và so từng byte.</summary>
-    [Fact]
-    public void Gp5_IsByteIdenticalToTheToolkitScript()
+    /// <summary>Phần đầu một PNG 8 bit (chữ ký + IHDR 1×1) với kiểu màu <paramref name="colorType"/> — đủ cho png_color_type của script.</summary>
+    internal static byte[] PngHeader(byte colorType) =>
+        [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, (byte)'I', (byte)'H', (byte)'D', (byte)'R', 0, 0, 0, 1, 0, 0, 0, 1, 8, colorType, 0, 0, 0, 0, 0, 0, 0];
+
+    /// <summary>
+    /// Tệp SELF tổng hợp: magic PS4 (<paramref name="legacy"/>) hoặc Prospero, header ghi ranh giới .sceversion ở 0x40 nhưng bản ghi thật
+    /// bắt đầu sớm hơn <paramref name="misalignment"/> byte.
+    /// </summary>
+    internal static byte[] SelfFile(bool legacy, int misalignment)
+    {
+        const int boundary = 0x40;
+        var name = "libc:"u8.ToArray();
+        var record = new List<byte> { 0, 0 };
+        record.AddRange(BitConverter.GetBytes((ushort)(name.Length + 17)));
+        record.Add(8);
+        record.AddRange(name);
+        var version = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 };
+        record.AddRange(version);
+        record.AddRange(version);
+        var data = new byte[boundary - misalignment + record.Count];
+        (legacy ? new byte[] { 0x4F, 0x15, 0x3D, 0x1D } : [0x54, 0x14, 0xF5, 0xEE]).CopyTo(data, 0);
+        BitConverter.GetBytes((ulong)boundary).CopyTo(data, 0x10);
+        for (var index = 0x20; index < boundary - misalignment; index++)
+        {
+            data[index] = 0xAB;
+        }
+
+        record.CopyTo(data, boundary - misalignment);
+        return data;
+    }
+
+    [Theory]
+    [InlineData(100)]
+    [InlineData(2)]
+    [InlineData(1)]
+    public void Gp5_IsByteIdenticalToTheToolkitScript(int chunkCount)
     {
         var script = FindToolkitScript();
         var python = FindPython();
@@ -273,7 +310,18 @@ public sealed class SonySdkFidelityTests : IDisposable
         var pythonOut = SonySdkProject.RealPath(Path.Combine(_root, "py"));
         var sharpOut = SonySdkProject.RealPath(Path.Combine(_root, "cs"));
         Directory.CreateDirectory(pythonOut);
-        File.WriteAllText(Path.Combine(source, "sce_sys", "param.json"), "{\"contentId\":\"" + ContentId + "\",\"versionFileUri\":\"\",\"attribute3\":0,\"localizedParameters\":{\"defaultLanguage\":\"ja-JP\",\"ja-JP\":{\"titleName\":\"Yōtei 格雷克 \\\"q\\\"\"}},\"applicationDrmType\":\"free\"}");
+        File.WriteAllText(Path.Combine(source, "sce_sys", "param.json"), "{\"applicationCategoryType\":0,\"contentId\":\"" + ContentId + "\",\"versionFileUri\":\"\",\"attribute3\":0,\"kernel\":{\"addcontMountLevel\":2,\"appSizeInGib\":300},\"localizedParameters\":{\"defaultLanguage\":\"ja-JP\",\"ja-JP\":{\"titleName\":\"Yōtei 格雷克 \\\"q\\\"\"}},\"applicationDrmType\":\"free\"}");
+        // fix12: thư mục SDK giữ riêng ở gốc, tệp sce_sys mới bị loại, SELF lệch header (sửa vào .gp5-assets) và SELF đúng (giữ nguyên).
+        Directory.CreateDirectory(Path.Combine(source, "sce_suppl"));
+        File.WriteAllBytes(Path.Combine(source, "sce_suppl", "x.bin"), new byte[1]);
+        Directory.CreateDirectory(Path.Combine(source, "SCE_SC", "y"));
+        File.WriteAllBytes(Path.Combine(source, "SCE_SC", "y", "z.bin"), new byte[1]);
+        File.WriteAllText(Path.Combine(source, "sce_sys", "pfs-region-hints.json"), "{}");
+        File.WriteAllBytes(Path.Combine(source, "sce_sys", "origin-relocinfo.dat"), new byte[4]);
+        Directory.CreateDirectory(Path.Combine(source, "sce_module"));
+        File.WriteAllBytes(Path.Combine(source, "sce_module", "libA.prx"), SelfFile(legacy: true, misalignment: 3));
+        File.WriteAllBytes(Path.Combine(source, "sce_module", "libB.prx"), SelfFile(legacy: false, misalignment: 0));
+        File.WriteAllBytes(Path.Combine(source, "sce_module", "libC.prx"), SelfFile(legacy: false, misalignment: 5));
 
         // Khôi phục PNG: cùng prospero-dds2png.exe cho cả hai bên (script nhận bộ chuyển đổi .py → bọc Wine trên macOS).
         var runtime = SonySdkToolchain.Resolve(out _);
@@ -289,6 +337,10 @@ public sealed class SonySdkFidelityTests : IDisposable
             }
 
             File.Copy(Path.Combine(source, "sce_sys", "pic0.dds"), Path.Combine(source, "sce_sys", "pic2.dds"));
+            // pic1.png sai chế độ màu (RGBA thay vì RGB) có pic1.dds: script thay bằng bản chuyển từ DDS; PNG hợp lệ không có DDS giữ nguyên.
+            File.Copy(Path.Combine(source, "sce_sys", "pic0.dds"), Path.Combine(source, "sce_sys", "pic1.dds"));
+            File.WriteAllBytes(Path.Combine(source, "sce_sys", "pic1.png"), PngHeader(6));
+            File.WriteAllBytes(Path.Combine(source, "sce_sys", "pic2_01.png"), PngHeader(6));
             string converterForScript;
             if (runtime!.UsesWine)
             {
@@ -321,7 +373,8 @@ public sealed class SonySdkFidelityTests : IDisposable
 
         var startInfo = new ProcessStartInfo(python)
         {
-            ArgumentList = { script, source, Path.Combine(pythonOut, "game.gp5"), "--passcode", Passcode, "--absolute-paths", "--keep-keystone" },
+            // Đúng các cờ build-from-folder.ps1 (fix12) truyền cho gói đầy đủ.
+            ArgumentList = { script, source, Path.Combine(pythonOut, "game.gp5"), "--passcode", Passcode, "--absolute-paths", "--keep-keystone", "--chunk-count", chunkCount.ToString(System.Globalization.CultureInfo.InvariantCulture), "--auto-size-profile", "sdk279" },
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -338,10 +391,18 @@ public sealed class SonySdkFidelityTests : IDisposable
         Assert.True(run.ExitCode == 0, stderr);
 
         // Script fix6 luôn tạo 100 chunk + chunk ngôn ngữ từ playgo-scenario.json: phía C# dùng cùng bố cục (PlayGo dự phòng).
-        var playGo = SonySdkPlayGo.ScriptFallback(Path.Combine(source, "sce_sys"), SonySdkProject.DefaultLanguageOf(Path.Combine(source, "sce_sys", "param.json")), out var scenarioWarning);
+        var playGo = SonySdkPlayGo.ScriptFallback(Path.Combine(source, "sce_sys"), SonySdkProject.DefaultLanguageOf(Path.Combine(source, "sce_sys", "param.json")), out var scenarioWarning, chunkCount);
         Assert.Null(scenarioWarning);
-        var result = SonySdkProject.Create(source, Path.Combine(sharpOut, "game.gp5"), Passcode, path => path, SonySdkSourcePlan.Pure with { PlayGo = playGo }, ddsConverter: converter);
+        var result = SonySdkProject.Create(source, Path.Combine(sharpOut, "game.gp5"), Passcode, path => path, SonySdkSourcePlan.Pure with { PlayGo = playGo, AutoSizeProfile = SonySdkPackageSize.Sdk279 }, ddsConverter: converter);
         Assert.Equal(3, result.PlayGoLanguagePayloads);
+        Assert.Equal(["sce_module/libA.prx", "sce_module/libC.prx"], result.RepairedSelfs.Select(item => item.Relative));
+        foreach (var (relative, _) in result.RepairedSelfs)
+        {
+            var path = Path.Combine(".gp5-assets", "game", SonySdkSelfRepair.FolderName, relative.Replace('/', Path.DirectorySeparatorChar));
+            Assert.Equal(File.ReadAllBytes(Path.Combine(pythonOut, path)), File.ReadAllBytes(Path.Combine(sharpOut, path)));
+        }
+
+        Assert.Equal(new SonySdkSizeSelection(0, null, result.SizeSelection!.EstimatedBytes, 2), result.SizeSelection);
         foreach (var payload in playGo.LanguagePayloads)
         {
             var relative = payload.Destination.Replace('/', Path.DirectorySeparatorChar);
@@ -354,14 +415,25 @@ public sealed class SonySdkFidelityTests : IDisposable
         Assert.Equal(Crlf(File.ReadAllBytes(Path.Combine(pythonOut, "game.playgo-scenario.json"))), Encoding.UTF8.GetString(File.ReadAllBytes(result.ScenarioPath)));
         Assert.Equal(Crlf(File.ReadAllBytes(Path.Combine(pythonOut, ".gp5-assets", "game", "sce_sys", "param.json"))), Encoding.UTF8.GetString(File.ReadAllBytes(result.ParamJsonPath)));
         Assert.Contains("\"applicationDrmType\": \"standard\"", File.ReadAllText(result.ParamJsonPath));
-        // Đầu ra console: Windows đổi "\n" thành "\r\n" khi in; nội dung nhật ký so theo dòng.
-        Assert.Equal(stdout.Replace("\r\n", "\n").Replace(pythonOut, sharpOut), result.Report);
+        // Đầu ra console: Windows đổi "\n" thành "\r\n" khi in; nội dung nhật ký so theo dòng. Cỡ gói tính cả playgo-scenario.json:
+        // Python ngoài Windows ghi LF nên tệp đó ngắn hơn bản chuẩn (CRLF) đúng số dòng — bù phần chênh vào hai con số của dòng cỡ gói.
+        var expectedReport = stdout.Replace("\r\n", "\n").Replace(pythonOut, sharpOut);
+        var scenarioDelta = new FileInfo(result.ScenarioPath).Length - new FileInfo(Path.Combine(pythonOut, "game.playgo-scenario.json")).Length;
+        if (scenarioDelta != 0)
+        {
+            var (bytes, _) = result.SizeInputs;
+            expectedReport = expectedReport
+                .Replace($"inputs: {bytes - scenarioDelta} bytes", $"inputs: {bytes} bytes")
+                .Replace($"estimate: {result.SizeSelection!.EstimatedBytes - scenarioDelta} bytes", $"estimate: {result.SizeSelection.EstimatedBytes} bytes");
+        }
+
+        Assert.Equal(expectedReport, result.Report);
         foreach (var png in result.RecoveredPngs)
         {
             Assert.Equal(File.ReadAllBytes(Path.Combine(pythonOut, ".gp5-assets", "game", "sce_sys", Path.GetFileName(png.PngPath))), File.ReadAllBytes(png.PngPath));
         }
 
-        Assert.Equal(converter == null ? 0 : 2, result.RecoveredPngs.Count);
+        Assert.Equal(converter == null ? 0 : 3, result.RecoveredPngs.Count);
     }
 
     [Fact]
@@ -459,7 +531,7 @@ public sealed class SonySdkFidelityTests : IDisposable
 
     private static string Quote(string value) => "'" + value.Replace("\\", "\\\\").Replace("'", "\\'") + "'";
 
-    private static string? FindToolkitScript()
+    internal static string? FindToolkitScript()
     {
         var current = AppContext.BaseDirectory;
         for (var depth = 0; depth < 8 && current != null; depth++)
@@ -476,7 +548,7 @@ public sealed class SonySdkFidelityTests : IDisposable
         return null;
     }
 
-    private static string? FindPython()
+    internal static string? FindPython()
     {
         foreach (var candidate in new[] { "/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3", "python3", "python" })
         {

@@ -84,6 +84,13 @@ public sealed class BuildRequest
     public bool RemoveAmprLeftovers { get; set; } = true;
 
     /// <summary>
+    /// Bỏ tàn dư của bản dump khỏi gói: thư mục <c>_DUBLEX_</c> ở gốc và các thư mục <c>Saved</c> của Unreal Engine (<c>Engine/Saved</c>,
+    /// <c>&lt;dự án&gt;/Saved</c>) — theo hướng dẫn sửa treo splash của Stellar Blade (<see cref="Services.DumpLeftoverInspector"/>).
+    /// Thư mục nguồn không bị đụng tới.
+    /// </summary>
+    public bool RemoveDumpLeftovers { get; set; } = true;
+
+    /// <summary>
     /// Bỏ các tệp sce_sys/playgo* của bản dump khỏi gói để thư viện tự tạo bộ PlayGo khớp với ảnh mới (Drakmor: game không
     /// khởi chạy kèm lỗi "playgo" trong log là do bộ playgo cũ). Mặc định bật.
     /// </summary>

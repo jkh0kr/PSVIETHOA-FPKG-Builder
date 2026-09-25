@@ -189,6 +189,20 @@ $numCompression.Width = 60
 $numCompression.Margin = New-Object System.Windows.Forms.Padding(0, 3, 24, 0)
 [void]$options.Controls.Add($numCompression)
 
+$lblChunkCount = New-Object System.Windows.Forms.Label
+$lblChunkCount.Text = 'PlayGo chunks (1..255):'
+$lblChunkCount.AutoSize = $true
+$lblChunkCount.Margin = New-Object System.Windows.Forms.Padding(0, 7, 8, 0)
+[void]$options.Controls.Add($lblChunkCount)
+
+$numChunkCount = New-Object System.Windows.Forms.NumericUpDown
+$numChunkCount.Minimum = 1
+$numChunkCount.Maximum = 255
+$numChunkCount.Value = 100
+$numChunkCount.Width = 65
+$numChunkCount.Margin = New-Object System.Windows.Forms.Padding(0, 3, 24, 0)
+[void]$options.Controls.Add($numChunkCount)
+
 $chkForce = New-Object System.Windows.Forms.CheckBox
 $chkForce.Text = 'Overwrite existing files (-Force)'
 $chkForce.AutoSize = $true
@@ -479,6 +493,7 @@ function Set-BuildControlsEnabled([bool]$enabled) {
     $btnExtractFolder.Enabled = $enabled
     $btnExtractClear.Enabled = $enabled
     $numCompression.Enabled = $enabled
+    $numChunkCount.Enabled = $enabled
     $chkForce.Enabled = $enabled
     $txtPasscode.Enabled = $enabled
     $cmbVerificationMode.Enabled = $enabled
@@ -752,6 +767,7 @@ $btnBuild.Add_Click({
     $txtOutput.Text = $output
     $txtReference.Text = $reference
     $compression = [int]$numCompression.Value
+    $chunkCount = [int]$numChunkCount.Value
 
     $powershellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     if (-not (Test-Path -LiteralPath $powershellExe -PathType Leaf)) {
@@ -767,7 +783,8 @@ $btnBuild.Add_Click({
         '-SourceFolder', $source,
         '-OutputPackage', $output,
         '-Passcode', $passcode,
-        '-CompressionLevel', $compression.ToString()
+        '-CompressionLevel', $compression.ToString(),
+        '-ChunkCount', $chunkCount.ToString()
     )
     if (-not [string]::IsNullOrWhiteSpace($temp)) {
         $arguments += @('-TemporaryDirectory', $temp)
@@ -789,6 +806,7 @@ $btnBuild.Add_Click({
     }
     $header += @(
         ('Compression: ' + $compression),
+        ('Chunks:      ' + $chunkCount),
         ('Force:       ' + $chkForce.Checked)
     )
 
