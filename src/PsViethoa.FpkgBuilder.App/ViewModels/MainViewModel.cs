@@ -2778,7 +2778,7 @@ public sealed partial class MainViewModel : ObservableObject
             Log(LogLevel.Info, Loc.F("FastParam.Running", Formatters.Size(info.FileSize)));
             var source = info.Path;
             var passcode = Passcode;
-            var progress = MakeFastPatchProgress();
+            var progress = MakeFastPatchProgress(info.FileSize);
 
             // Trình sửa hiển thị bản THỤT ĐẦU DÒNG cho dễ đọc — khe CNT chỉ rộng bằng param.json gốc, gửi nguyên bản
             // indented sẽ tràn khe. Đóng gói lại COMPACT (giữ nguyên mọi giá trị đã sửa) trước khi vá.
@@ -2858,27 +2858,63 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private double _fastPatchPercent;
     [ObservableProperty] private string _fastPatchText = string.Empty;
 
-    /// <summary>Đưa tiến độ của CntParamPatcher (luồng nền) lên hai thuộc tính hiển thị, tiết chế theo từng % nguyên.</summary>
-    private Action<double, string> MakeFastPatchProgress()
+    partial void OnIsFastPatchingChanged(bool value) => CancelFastPatchCommand.NotifyCanExecuteChanged();
+
+    /// <summary>
+    /// Đưa tiến độ của CntParamPatcher (luồng nền) lên hai thuộc tính hiển thị. Giai đoạn sao chép chiếm 0..60% tỉ lệ với
+    /// số byte đã chép nên suy ra byte từ phần trăm, đo tốc độ (làm mượt EMA) và thời gian còn lại; cập nhật UI tối đa ~5 lần/giây.
+    /// </summary>
+    private Action<double, string> MakeFastPatchProgress(long totalBytes)
     {
-        var lastPercent = -1;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var lastUiAt = TimeSpan.MinValue;
+        var lastSampleAt = stopwatch.Elapsed;
+        long lastSampleBytes = 0;
+        double bytesPerSecond = 0;
+
         return (percent, phase) =>
         {
-            var whole = (int)Math.Clamp(Math.Round(percent), 0, 100);
-            if (whole == lastPercent)
+            var now = stopwatch.Elapsed;
+
+            // Đo tốc độ theo byte (chỉ giai đoạn sao chép, 0..60%).
+            long copied = 0;
+            if (phase == "copying")
+            {
+                copied = (long)(totalBytes * Math.Clamp(percent, 0, 60) / 60.0);
+                var sampleDt = (now - lastSampleAt).TotalSeconds;
+                if (sampleDt >= 0.3)
+                {
+                    var instant = (copied - lastSampleBytes) / sampleDt;
+                    bytesPerSecond = bytesPerSecond <= 0 ? instant : bytesPerSecond * 0.7 + instant * 0.3;
+                    lastSampleBytes = copied;
+                    lastSampleAt = now;
+                }
+            }
+
+            if ((now - lastUiAt).TotalMilliseconds < 200 && percent < 100)
             {
                 return;
             }
 
-            lastPercent = whole;
-            var text = phase switch
+            lastUiAt = now;
+            var whole = (int)Math.Clamp(Math.Round(percent), 0, 100);
+            string text;
+            if (phase == "copying" && bytesPerSecond > 1 && whole < 60)
             {
-                "copying" => Loc.F("FastParam.PhaseCopy", whole),
-                "re-sealing CNT" => Loc.F("FastParam.PhaseSeal", whole),
-                "rebuilding SI PlayGo CRCs" => Loc.F("FastParam.PhaseCrc", whole),
-                "done" => Loc.T("FastParam.PhaseDone"),
-                _ => $"{whole:0}%",
-            };
+                var remaining = TimeSpan.FromSeconds(Math.Max(0, totalBytes - copied) / bytesPerSecond);
+                text = Loc.F("FastParam.PhaseCopy", whole) + Loc.F("FastParam.SpeedEta", Formatters.Size((long)bytesPerSecond) + "/s", Formatters.Duration(remaining));
+            }
+            else
+            {
+                text = phase switch
+                {
+                    "copying" => Loc.F("FastParam.PhaseCopy", whole),
+                    "re-sealing CNT" => Loc.F("FastParam.PhaseSeal", whole),
+                    "rebuilding SI PlayGo CRCs" => Loc.F("FastParam.PhaseCrc", whole),
+                    "done" => Loc.T("FastParam.PhaseDone"),
+                    _ => $"{whole:0}%",
+                };
+            }
 
             Dispatcher.UIThread.Post(() =>
             {
