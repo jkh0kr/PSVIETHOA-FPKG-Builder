@@ -226,15 +226,15 @@ public sealed class DialogService
     }
 
     /// <summary>
-    /// Mở trình sửa param.json: hiển thị bản gốc (đã gộp phần ghi đè cũ nếu có) cho người dùng sửa. Trả về (đã lưu, nội dung
-    /// phần ghi đè); nội dung null = người dùng trả về như gốc — bỏ phần ghi đè đang có.
+    /// Mở trình sửa param.json: hiển thị bản gốc (đã gộp phần ghi đè cũ nếu có) cho người dùng sửa. Trả về (đã lưu, phần
+    /// ghi đè, toàn bộ nội dung đã sửa); phần ghi đè null = người dùng trả về như gốc — bỏ phần ghi đè đang có.
     /// </summary>
-    public async Task<(bool Saved, string? OverrideJson)> EditParamJsonAsync(string title, string? originalJson, string? currentOverride)
+    public async Task<(bool Saved, string? OverrideJson, string? EditedText)> EditParamJsonAsync(string title, string? originalJson, string? currentOverride)
     {
         var dialog = new ParamJsonEditorDialog { Title = title };
         dialog.Prepare(originalJson, currentOverride);
         var saved = await dialog.ShowDialog<bool>(_owner);
-        return (saved, saved ? dialog.OverrideJson : null);
+        return (saved, saved ? dialog.OverrideJson : null, saved ? dialog.EditedText : null);
     }
 
     private static async Task<IStorageFolder?> TryGetFolderAsync(IStorageProvider provider, string? path)

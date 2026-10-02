@@ -30,6 +30,9 @@ public partial class ParamJsonEditorDialog : Window
     /// <summary>Nội dung phần ghi đè sẽ lưu (null = người dùng trả về như gốc — xoá phần ghi đè đang có).</summary>
     public string? OverrideJson { get; private set; }
 
+    /// <summary>Toàn bộ nội dung đã sửa (để ghi thẳng thành tệp — ví dụ sửa param.json của một gói .pkg); null khi chưa lưu.</summary>
+    public string? EditedText { get; private set; }
+
     /// <summary>Điền nội dung mở sẵn: bản gốc (hoặc gộp phần ghi đè đã lưu vào bản gốc cho người dùng sửa tiếp từ đó).</summary>
     public void Prepare(string? originalJson, string? currentOverride)
     {
@@ -74,6 +77,7 @@ public partial class ParamJsonEditorDialog : Window
         }
 
         var diff = ParamJsonPatch.BuildOverrideDiff(_original, edited);
+        EditedText = edited.ToJsonString(WriteOptions);
         if (diff == null)
         {
             // Trả về như gốc: không còn gì phải ghi đè.
