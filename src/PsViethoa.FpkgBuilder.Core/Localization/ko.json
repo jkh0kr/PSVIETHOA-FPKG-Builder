@@ -1057,7 +1057,7 @@
   "Edit.AutoBuildLater": "나중에",
   "Edit.AutoBuildLaterLog": "패치 모드가 준비되어 있습니다 — 원할 때 PKG 빌드를 누르면 UPDATE_….pkg가 만들어집니다.",
   "FastParam.Button": "빠른 재봉인 (실험적, 약 1분)",
-  "FastParam.Tip": "패키지를 복사한 뒤 CNT 슬롯 안의 param.json을 그대로 교체합니다 — 재압축 없이, 건드린 64 KiB 블록만 재봉인합니다(다이제스트, CNT 봉인, RSA 랩, PlayGo CRC). 원본 .pkg는 그대로입니다. 실험적: 실제 콘솔 검증 전.",
+  "FastParam.Tip": "패키지를 복사한 뒤 CNT 슬롯 안의 param.json을 그대로 교체 — 재압축 없이 약 1분. 결과물은 전체 설치 파일(업데이트 파일 아님, 콘솔에서 전체 재설치됨). 작은 업데이트 파일을 원하면 위 UPDATE 빌드 사용(재압축 필요). 원본 .pkg는 그대로. 실험적: 실제 콘솔 검증 전.",
   "FastParam.SaveTitle": "빠른 수정 패키지 저장",
   "FastParam.Running": "빠른 재봉인: {0} 복사 후 param.json 슬롯 재봉인 중 (재압축 없음)…",
   "FastParam.Done": "빠른 재봉인 완료 ({0}): {1} (슬롯 {2}바이트, 패딩 {3}, 블록 {4}개 재봉인). 실험적 — 콘솔에서 테스트해 주세요.",

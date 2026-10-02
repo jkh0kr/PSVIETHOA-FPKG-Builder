@@ -1054,7 +1054,7 @@
   "Edit.AutoBuildLater": "Để sau",
   "Edit.AutoBuildLaterLog": "Chế độ bản vá đã dựng sẵn — bấm Tạo gói bất cứ lúc nào khi muốn có UPDATE_….pkg.",
   "FastParam.Button": "Niêm phong nhanh (thử nghiệm, ~1 phút)",
-  "FastParam.Tip": "Sao chép gói rồi thay param.json ngay trong khe CNT của nó — không nén lại gì, chỉ niêm phong lại vài khối 64 KiB bị chạm (digest, dấu niêm CNT, lớp RSA, CRC PlayGo). Gói .pkg gốc không bị đụng. Thử nghiệm: chưa kiểm trên máy thật.",
+  "FastParam.Tip": "Sao chép gói rồi thay param.json ngay trong khe CNT — không nén lại, khoảng một phút. Kết quả là gói cài ĐẦY ĐỦ (không phải tệp update — máy sẽ cài lại toàn bộ). Muốn tệp update nhỏ hãy dùng lượt UPDATE ở trên (phải nén lại một lần). Gói .pkg gốc không bị đụng. Thử nghiệm: chưa kiểm trên máy thật.",
   "FastParam.SaveTitle": "Lưu gói đã vá nhanh",
   "FastParam.Running": "Vá nhanh: đang sao chép {0} và niêm phong lại khe param.json (không nén lại)…",
   "FastParam.Done": "Vá nhanh xong sau {0}: {1} (khe {2} byte, đệm {3}, niêm phong lại {4} khối). Thử nghiệm — hãy kiểm trên máy.",

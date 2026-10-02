@@ -1054,7 +1054,7 @@
   "Edit.AutoBuildLater": "Later",
   "Edit.AutoBuildLaterLog": "Patch mode is set up and ready — press Build PKG whenever you want the UPDATE_….pkg.",
   "FastParam.Button": "Fast re-seal (experimental, ~1 min)",
-  "FastParam.Tip": "Copies the package and replaces param.json right in its CNT slot — nothing is recompressed, only the touched 64 KiB blocks are re-sealed (digests, CNT seals, RSA wrap, PlayGo CRCs). The original .pkg is untouched. Experimental: not yet verified on a real console.",
+  "FastParam.Tip": "Copies the package and replaces param.json right in its CNT slot — no recompression, about a minute. The result is a FULL install package (not an update file — the console reinstalls everything). For a small update file use the UPDATE build above (recompresses once). The original .pkg is untouched. Experimental: not yet verified on a real console.",
   "FastParam.SaveTitle": "Save the fast-patched package",
   "FastParam.Running": "Fast re-seal: copying {0} and re-sealing the param.json slot (no recompression)…",
   "FastParam.Done": "Fast re-seal finished in {0}: {1} (slot {2} bytes, {3} padded, {4} blocks re-sealed). Experimental — please test on the console.",
