@@ -92,10 +92,14 @@ public partial class MainWindow : Window
             }, TimeSpan.FromSeconds(1));
         }
 
-        // Chế độ giải nén khi khởi động (chụp màn hình/kiểm thử): PSVIETHOA_MODE=extract, PSVIETHOA_EXTRACT_PKG=/duong/dan.pkg
+        // Chế độ giải nén / sửa gói khi khởi động (chụp màn hình/kiểm thử): PSVIETHOA_MODE=extract|edit, PSVIETHOA_EXTRACT_PKG=/duong/dan.pkg
         if (ViewModel != null && string.Equals(Environment.GetEnvironmentVariable("PSVIETHOA_MODE"), "extract", StringComparison.OrdinalIgnoreCase))
         {
             ViewModel.IsExtractMode = true;
+        }
+        else if (ViewModel != null && string.Equals(Environment.GetEnvironmentVariable("PSVIETHOA_MODE"), "edit", StringComparison.OrdinalIgnoreCase))
+        {
+            ViewModel.IsEditMode = true;
         }
 
         // Khối bản vá khi khởi động (chụp màn hình/kiểm thử): PSVIETHOA_SOURCE=thư mục nguồn, PSVIETHOA_PATCH_REF=gói gốc .pkg

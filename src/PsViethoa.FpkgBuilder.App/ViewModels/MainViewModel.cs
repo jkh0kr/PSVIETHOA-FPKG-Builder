@@ -371,6 +371,15 @@ public sealed partial class MainViewModel : ObservableObject
         SelectMode(value, nameof(IsQueueMode));
     }
 
+    /// <summary>Tab "Sửa gói": chọn một .pkg có sẵn, sửa param.json rồi tạo bản vá UPDATE — không giải nén toàn bộ game.</summary>
+    [ObservableProperty] private bool _isEditMode;
+
+    partial void OnIsEditModeChanged(bool value)
+    {
+        OnPropertyChanged(nameof(FooterStatusText));
+        SelectMode(value, nameof(IsEditMode));
+    }
+
     /// <summary>Tab "Tạo gói Update": cùng màn hình với Tạo gói nhưng có khối gói gốc / thư mục game gốc và 3 kiểu tạo (update, base, cả hai).</summary>
     [ObservableProperty] private bool _isUpdateMode;
 
@@ -407,6 +416,7 @@ public sealed partial class MainViewModel : ObservableObject
             IsUpdateMode = mode == nameof(IsUpdateMode);
             IsExtractMode = mode == nameof(IsExtractMode);
             IsQueueMode = mode == nameof(IsQueueMode);
+            IsEditMode = mode == nameof(IsEditMode);
         }
         finally
         {
@@ -457,7 +467,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void ApplyModeChanged()
     {
-        DebugLog.Write($"Mode: build={IsBuildMode} update={IsUpdateMode} extract={IsExtractMode} queue={IsQueueMode}");
+        DebugLog.Write($"Mode: build={IsBuildMode} update={IsUpdateMode} extract={IsExtractMode} queue={IsQueueMode} edit={IsEditMode}");
         BuildCommand.NotifyCanExecuteChanged();
         _settings.ExtractMode = IsExtractMode;
         if (IsExtractMode)
@@ -2606,6 +2616,107 @@ public sealed partial class MainViewModel : ObservableObject
         ReferencePackagePath = info.Path;
         SetSource(folder);
         Log(LogLevel.Info, Loc.F("Extract.EditRebuildSwitched", folder, Path.GetFileName(info.Path)));
+    }
+
+    // ===================== Chế độ "Sửa gói" (sửa .pkg có sẵn) =====================
+
+    private PackageInfo? _editInfo;
+    private CancellationTokenSource? _editInspectCancellation;
+
+    [ObservableProperty] private string _editPkgPath = string.Empty;
+    [ObservableProperty] private bool _isInspectingEditPkg;
+    [ObservableProperty] private bool _hasEditPkg;
+    [ObservableProperty] private string _editPkgTitle = string.Empty;
+    [ObservableProperty] private string _editPkgSubtitle = string.Empty;
+    [ObservableProperty] private string _editPkgError = string.Empty;
+
+    public bool HasEditPkgError => !string.IsNullOrEmpty(EditPkgError);
+
+    [RelayCommand]
+    private async Task BrowseEditPkgAsync()
+    {
+        var initial = HasEditPkg ? Path.GetDirectoryName(EditPkgPath) : null;
+        var file = await _dialogs.PickFileAsync(Loc.T("Edit.PickTitle"), initial, new FilePickerFileType(Loc.T("Extract.PkgFilter")) { Patterns = ["*.pkg"] });
+        if (file != null)
+        {
+            await InspectEditPkgAsync(file);
+        }
+    }
+
+    /// <summary>Đọc .pkg (FIH/CNT, param.json từ vùng CNT) để hiện tóm tắt trước khi bấm sửa.</summary>
+    public async Task InspectEditPkgAsync(string path)
+    {
+        _editInspectCancellation?.Cancel();
+        _editInspectCancellation?.Dispose();
+        _editInspectCancellation = null;
+
+        EditPkgPath = path;
+        IsInspectingEditPkg = true;
+        HasEditPkg = false;
+        EditPkgError = string.Empty;
+        EditPkgTitle = Loc.T("Edit.Inspecting");
+        EditPkgSubtitle = path;
+        var cancellation = new CancellationTokenSource();
+        _editInspectCancellation = cancellation;
+        try
+        {
+            var passcode = Passcode;
+            var info = await Task.Run(() => PackageInspector.Inspect(path, passcode, cancellation.Token), cancellation.Token);
+            if (cancellation.IsCancellationRequested)
+            {
+                return;
+            }
+
+            _editInfo = info;
+            if (info.Kind != PackageContainerKind.FullDebug)
+            {
+                EditPkgTitle = Loc.T("Extract.RetailBlocked");
+                EditPkgSubtitle = string.Empty;
+                EditPkgError = Loc.T(info.Kind == PackageContainerKind.FullRetail ? "Extract.RetailBlocked" : "Extract.UnknownBlocked");
+                return;
+            }
+
+            HasEditPkg = true;
+            EditPkgTitle = string.IsNullOrWhiteSpace(info.Title) ? Path.GetFileNameWithoutExtension(path) : info.Title!;
+            EditPkgSubtitle = Loc.F("Edit.Summary", info.ContentId ?? "—", info.Params?.ContentVersion ?? "—", Formatters.Size(info.FileSize));
+            if (info.ParamJsonBytes is not { Length: > 0 })
+            {
+                EditPkgError = Loc.T("Edit.NoParam");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _editInfo = null;
+            EditPkgTitle = Loc.T("Edit.InspectFailedTitle");
+            EditPkgSubtitle = string.Empty;
+            EditPkgError = ex.Message;
+        }
+        finally
+        {
+            if (!cancellation.IsCancellationRequested)
+            {
+                IsInspectingEditPkg = false;
+            }
+
+            OnPropertyChanged(nameof(HasEditPkgError));
+        }
+    }
+
+    private bool CanEditExistingPkg => HasEditPkg && !IsBuilding && !IsInspectingEditPkg;
+
+    [RelayCommand(CanExecute = nameof(CanEditExistingPkg))]
+    private async Task EditExistingPkgAsync()
+    {
+        if (_editInfo is not { } info)
+        {
+            return;
+        }
+
+        // Sửa xong thì chuyển sang chế độ tạo gói (bản vá) — ở lại tab này chỉ khi người dùng bỏ hộp thoại.
+        await EditPackageDirectAsync(info, Passcode);
     }
 
     /// <summary>Tìm phần ghi đè param.json đã lưu cho một nguồn (khoá so không phân biệt hoa/thường như đường dẫn Windows).</summary>
