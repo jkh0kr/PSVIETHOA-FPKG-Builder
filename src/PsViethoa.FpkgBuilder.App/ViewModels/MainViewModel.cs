@@ -2869,11 +2869,15 @@ public sealed partial class MainViewModel : ObservableObject
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var lastUiAt = stopwatch.Elapsed - TimeSpan.FromSeconds(1);
         TimeSpan? copyStartedAt = null;
+        var gate = new object();
 
+        // Sao chép song song gọi callback từ nhiều luồng — khoá để các biến đếm trong closure không chạy đua.
         return (percent, phase) =>
         {
-            try
+            lock (gate)
             {
+                try
+                {
                 var now = stopwatch.Elapsed;
 
                 // Tốc độ HIỂN THỊ là bình quân TÍCH LUỴ (byte đã chép / thời gian chép từ đầu) — không nhấp nhô theo
@@ -2923,10 +2927,11 @@ public sealed partial class MainViewModel : ObservableObject
                     FastPatchPercent = whole;
                     FastPatchText = text;
                 });
-            }
-            catch (Exception)
-            {
-                // Tiến độ chỉ để hiển thị — lỗi định dạng không được làm hỏng lượt vá đang chạy.
+                }
+                catch (Exception)
+                {
+                    // Tiến độ chỉ để hiển thị — lỗi định dạng không được làm hỏng lượt vá đang chạy.
+                }
             }
         };
     }

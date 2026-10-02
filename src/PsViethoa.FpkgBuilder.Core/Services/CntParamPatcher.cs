@@ -209,12 +209,28 @@ public static class CntParamPatcher
         return new CntParamPatchReport(slot.Size, padded.Length - newParamJson.Length, touched.Count, path);
     }
 
+    /// <summary>
+    /// Sao chép gói nguồn sang tệp đích. Ổ SSD (không có seek penalty — hỏi trực tiếp driver qua IOCTL trên Windows) chép
+    /// SONG SONG 4 luồng theo đoạn 1 MB-can; ổ HDD / USB / mạng chép tuần tự như cũ (song song trên HDD còn chậm hơn).
+    /// </summary>
     private static void CopyFile(string source, string target, Action<double, string>? progress, CancellationToken cancellationToken)
     {
-        const long chunk = 1 << 22;
+        long total;
+        using (var probe = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, FileOptions.SequentialScan))
+        {
+            total = probe.Length;
+        }
+
+        var degree = ChooseCopyDegree(source);
+        if (degree > 1 && total >= (64L << 20))
+        {
+            ParallelCopy(source, target, total, degree, progress, cancellationToken);
+            return;
+        }
+
+        const long chunk = 1 << 24;
         using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
         using var output = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, FileOptions.SequentialScan);
-        var total = input.Length;
         long done = 0;
         var buffer = new byte[chunk];
         while (done < total)
@@ -232,19 +248,206 @@ public static class CntParamPatcher
         }
     }
 
+    private static void ParallelCopy(string source, string target, long total, int degree, Action<double, string>? progress, CancellationToken cancellationToken)
+    {
+        // Cấp phát trước độ dài tệp để các luồng ghi vị trí bất kỳ không phải mở rộng tệp dần.
+        using (var init = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, FileOptions.SequentialScan))
+        {
+            init.SetLength(total);
+        }
+
+        var segment = ((total + degree - 1) / degree + (1 << 20) - 1) & ~((1 << 20) - 1L);
+        long done = 0;
+        Exception? failure = null;
+        var workers = new Thread[degree];
+        for (var index = 0; index < degree; index++)
+        {
+            var start = (long)index * segment;
+            if (start >= total)
+            {
+                break;
+            }
+
+            var end = Math.Min(total, start + segment);
+            workers[index] = new Thread(() =>
+            {
+                try
+                {
+                    using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 22, FileOptions.SequentialScan);
+                    using var output = new FileStream(target, FileMode.Open, FileAccess.Write, FileShare.Write, 1 << 22, FileOptions.SequentialScan);
+                    var buffer = new byte[1 << 22];
+                    long position = start;
+                    while (position < end)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var size = (int)Math.Min(buffer.Length, end - position);
+                        input.Position = position;
+                        input.ReadExactly(buffer, 0, size);
+                        output.Position = position;
+                        output.Write(buffer, 0, size);
+                        position += size;
+                        var copied = System.Threading.Interlocked.Add(ref done, size);
+                        progress?.Invoke(60.0 * copied / total, "copying");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lock (workers)
+                    {
+                        failure ??= ex;
+                    }
+                }
+            })
+            {
+                IsBackground = true,
+            };
+            workers[index].Start();
+        }
+
+        foreach (var worker in workers)
+        {
+            worker?.Join();
+        }
+
+        if (failure != null)
+        {
+            throw failure;
+        }
+    }
+
+    /// <summary>SSD (không seek penalty) → 4 luồng; USB/đĩa quang → tuần tự; mạng → 2; không dò được → 4.</summary>
+    private static int ChooseCopyDegree(string source)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(Path.GetFullPath(source));
+            if (string.IsNullOrEmpty(root) || root.Length < 2 || root[1] != ':')
+            {
+                return 2; // UNC/đường dẫn mạng
+            }
+
+            var drive = new DriveInfo(root);
+            if (drive.DriveType == DriveType.Network)
+            {
+                return 2;
+            }
+
+            if (drive.DriveType != DriveType.Fixed)
+            {
+                return 1; // USB / thẻ nhớ: tuần tự an toàn
+            }
+
+            return OperatingSystem.IsWindows() && VolumeIncursSeekPenalty(root[0]) ? 1 : 4;
+        }
+        catch (Exception)
+        {
+            return 4;
+        }
+    }
+
+    private const uint IoctlStorageGetDeviceNumber = 0x2D1080;
+    private const uint IoctlStorageQueryProperty = 0x2D1400;
+    private const uint StorageDeviceSeekPenaltyProperty = 7;
+
+    /// <summary>Hỏi driver ổ đĩa (Windows): ổ này có bị phạt seek (HDD) không? Trả về true cho HDD, false cho SSD.</summary>
+    private static bool VolumeIncursSeekPenalty(char driveLetter)
+    {
+        var invalid = new IntPtr(-1);
+        var volume = CreateFile($"\\\\.\\{driveLetter}:", 0, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+        if (volume == invalid)
+        {
+            throw new InvalidOperationException("cannot open volume");
+        }
+
+        try
+        {
+            var number = new byte[12];
+            if (!DeviceIoControl(volume, IoctlStorageGetDeviceNumber, null, 0, number, (uint)number.Length, out _, IntPtr.Zero))
+            {
+                throw new InvalidOperationException("cannot query device number");
+            }
+
+            var disk = (uint)(number[4] | (number[5] << 8) | (number[6] << 16) | (number[7] << 24));
+            var physical = CreateFile($"\\\\.\\PhysicalDrive{disk}", 0, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+            if (physical == invalid)
+            {
+                throw new InvalidOperationException("cannot open physical drive");
+            }
+
+            try
+            {
+                var query = new byte[9];
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(query, StorageDeviceSeekPenaltyProperty);
+                var result = new byte[12];
+                if (!DeviceIoControl(physical, IoctlStorageQueryProperty, query, (uint)query.Length, result, (uint)result.Length, out var returned, IntPtr.Zero) || returned < 9)
+                {
+                    throw new InvalidOperationException("cannot query seek penalty");
+                }
+
+                return result[8] != 0;
+            }
+            finally
+            {
+                CloseHandle(physical);
+            }
+        }
+        finally
+        {
+            CloseHandle(volume);
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr CreateFile(string lpFileName, uint dwDesiredAccess, uint dwShareMode, IntPtr lpSecurityAttributes, uint dwCreationDisposition, uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool DeviceIoControl(IntPtr hDevice, uint dwIoControlCode, byte[]? lpInBuffer, uint nInBufferSize, byte[] lpOutBuffer, uint nOutBufferSize, out uint lpBytesReturned, IntPtr lpOverlapped);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    /// <summary>
+    /// Sửa CRC32C PlayGo trong kho SI CHỈ những gì cần: đọc EOCD (cuối kho) → thư mục trung tâm (vài KB) → mục
+    /// playgo-chunk.crc (~số khối × 4 byte), cập nhật CRC các khối vừa chạm rồi ghi lại đúng vị trí mục + 2 trường
+    /// CRC-32 của ZIP — không đọc/ghi lại cả kho SI hàng chục MB như trước.
+    /// </summary>
     private static void RepairPlayGoCrc(FileStream stream, long fileSize, long supplementOffset, SortedSet<long> touched)
     {
-        var archive = ReadExact(stream, supplementOffset, checked((int)(fileSize - supplementOffset)));
+        var blockCount = (supplementOffset + BlockSize - 1) / BlockSize;
         var contentIdBytes = ReadExact(stream, GetCntOffset(stream), 0x70).AsSpan(0x40, 0x30);
         var terminator = contentIdBytes.IndexOf((byte)0);
         var contentId = Encoding.ASCII.GetString(terminator < 0 ? contentIdBytes.ToArray() : contentIdBytes[..terminator].ToArray());
         var crcName = $"config/{contentId}/playgo-chunk.crc";
-        var member = FindStoredMember(archive, crcName);
-        var current = archive.AsSpan(member.DataOffset, member.Size).ToArray();
-        var blockCount = (supplementOffset + BlockSize - 1) / BlockSize;
+
+        var supplementSize = fileSize - supplementOffset;
+        var tailLength = (int)Math.Min(supplementSize, 0x10016 + 22);
+        if (tailLength < 22)
+        {
+            return;
+        }
+
+        var tail = ReadExact(stream, fileSize - tailLength, tailLength);
+        var eocd = LastIndexOf(tail, "PK\x05\x06"u8, 0);
+        if (eocd < 0 || eocd + 22 > tail.Length)
+        {
+            return; // bố cục khác dự kiến: bỏ qua sửa CRC, phần còn lại đã niêm phong đúng
+        }
+
+        var centralSize = BinaryPrimitives.ReadUInt32LittleEndian(tail.AsSpan(eocd + 12));
+        var centralOffset = BinaryPrimitives.ReadUInt32LittleEndian(tail.AsSpan(eocd + 16));
+        if (centralSize > supplementSize || centralOffset + (long)centralSize > supplementSize - 22)
+        {
+            return;
+        }
+
+        var central = ReadExact(stream, supplementOffset + centralOffset, (int)centralSize);
+        var member = FindCrcMember(stream, supplementOffset, central, centralSize, crcName);
+        var current = ReadExact(stream, supplementOffset + member.DataOffset, member.Size);
         if (current.Length != blockCount * 4)
         {
-            return; // bố cục khác dự kiến: bỏ qua sửa CRC (thử nghiệm), phần còn lại đã niêm phong đúng
+            return; // bố cục khác dự kiến: bỏ qua sửa CRC
         }
 
         foreach (var blockIndex in touched)
@@ -260,58 +463,40 @@ public static class CntParamPatcher
             BinaryPrimitives.WriteUInt32LittleEndian(current.AsSpan((int)blockIndex * 4), ProsperoCrc32C.Compute(block));
         }
 
-        // Ghi lại mục ZIP STORED (cùng kích thước) + CRC-32 ở hai đầu.
-        current.CopyTo(archive, member.DataOffset);
         var crc = SonySdkConverter.ZipCrc32(current);
-        BinaryPrimitives.WriteUInt32LittleEndian(archive.AsSpan(member.LocalHeader + 14), crc);
-        BinaryPrimitives.WriteUInt32LittleEndian(archive.AsSpan(member.CentralRecord + 16), crc);
-        WriteAt(stream, supplementOffset, archive);
+        WriteAt(stream, supplementOffset + member.DataOffset, current);
+        WriteAt(stream, supplementOffset + member.LocalHeader + 14, [unchecked((byte)crc), (byte)(crc >> 8), (byte)(crc >> 16), (byte)(crc >> 24)]);
+        WriteAt(stream, supplementOffset + member.CentralRecord + 16, [unchecked((byte)crc), (byte)(crc >> 8), (byte)(crc >> 16), (byte)(crc >> 24)]);
     }
 
-    private static long GetCntOffset(FileStream stream)
+    private readonly record struct SiMember(int LocalHeader, int DataOffset, int Size, int CentralRecord);
+
+    /// <summary>Tìm mục ZIP STORED theo tên trong thư mục trung tâm (đã đọc sẵn) rồi đọc header cục bộ để tính DataOffset.</summary>
+    private static SiMember FindCrcMember(FileStream stream, long supplementOffset, byte[] central, uint centralSize, string name)
     {
-        stream.Position = 0x58;
-        var buffer = new byte[8];
-        stream.ReadExactly(buffer);
-        return (long)BinaryPrimitives.ReadUInt64LittleEndian(buffer);
-    }
-
-    private readonly record struct ZipMember(int LocalHeader, int DataOffset, int Size, int CentralRecord);
-
-    private static ZipMember FindStoredMember(byte[] archive, string name)
-    {
-        var eocd = LastIndexOf(archive, "PK\x05\x06"u8, Math.Max(0, archive.Length - 0x10016));
-        if (eocd < 0 || eocd + 22 > archive.Length)
+        SiMember? found = null;
+        var cursor = 0;
+        while (cursor < centralSize)
         {
-            throw new InvalidDataException("SI end-of-central-directory record is missing");
-        }
-
-        var centralSize = BinaryPrimitives.ReadUInt32LittleEndian(archive.AsSpan(eocd + 12));
-        var centralOffset = BinaryPrimitives.ReadUInt32LittleEndian(archive.AsSpan(eocd + 16));
-        var centralEnd = (long)centralOffset + centralSize;
-        if (centralEnd > eocd)
-        {
-            throw new InvalidDataException("SI central directory is outside the archive");
-        }
-
-        ZipMember? found = null;
-        var cursor = (int)centralOffset;
-        while (cursor < centralEnd)
-        {
-            if (!archive.AsSpan(cursor, 4).SequenceEqual("PK\x01\x02"u8))
+            if (cursor + 46 > central.Length || !central.AsSpan(cursor, 4).SequenceEqual("PK\x01\x02"u8))
             {
                 throw new InvalidDataException("invalid SI central-directory record");
             }
 
-            var flags = BinaryPrimitives.ReadUInt16LittleEndian(archive.AsSpan(cursor + 8));
-            var method = BinaryPrimitives.ReadUInt16LittleEndian(archive.AsSpan(cursor + 10));
-            var compressedSize = BinaryPrimitives.ReadUInt32LittleEndian(archive.AsSpan(cursor + 20));
-            var uncompressedSize = BinaryPrimitives.ReadUInt32LittleEndian(archive.AsSpan(cursor + 24));
-            var nameSize = BinaryPrimitives.ReadUInt16LittleEndian(archive.AsSpan(cursor + 28));
-            var extraSize = BinaryPrimitives.ReadUInt16LittleEndian(archive.AsSpan(cursor + 30));
-            var commentSize = BinaryPrimitives.ReadUInt16LittleEndian(archive.AsSpan(cursor + 32));
-            var localHeader = (int)BinaryPrimitives.ReadUInt32LittleEndian(archive.AsSpan(cursor + 42));
-            var entryName = Encoding.UTF8.GetString(archive, cursor + 46, nameSize);
+            var flags = BinaryPrimitives.ReadUInt16LittleEndian(central.AsSpan(cursor + 8));
+            var method = BinaryPrimitives.ReadUInt16LittleEndian(central.AsSpan(cursor + 10));
+            var compressedSize = BinaryPrimitives.ReadUInt32LittleEndian(central.AsSpan(cursor + 20));
+            var uncompressedSize = BinaryPrimitives.ReadUInt32LittleEndian(central.AsSpan(cursor + 24));
+            var nameSize = BinaryPrimitives.ReadUInt16LittleEndian(central.AsSpan(cursor + 28));
+            var extraSize = BinaryPrimitives.ReadUInt16LittleEndian(central.AsSpan(cursor + 30));
+            var commentSize = BinaryPrimitives.ReadUInt16LittleEndian(central.AsSpan(cursor + 32));
+            var localHeader = (int)BinaryPrimitives.ReadUInt32LittleEndian(central.AsSpan(cursor + 42));
+            if (cursor + 46 + nameSize > central.Length)
+            {
+                throw new InvalidDataException("invalid SI central-directory record");
+            }
+
+            var entryName = Encoding.UTF8.GetString(central, cursor + 46, nameSize);
             if (entryName == name)
             {
                 if (found != null)
@@ -324,20 +509,29 @@ public static class CntParamPatcher
                     throw new InvalidDataException($"SI member is not a directly patchable STORED entry: {name}");
                 }
 
-                if (!archive.AsSpan(localHeader, 4).SequenceEqual("PK\x03\x04"u8))
+                var local = ReadExact(stream, supplementOffset + localHeader, 34);
+                if (!local.AsSpan(0, 4).SequenceEqual("PK\x03\x04"u8))
                 {
                     throw new InvalidDataException($"invalid SI local header for {name}");
                 }
 
-                var localNameSize = BinaryPrimitives.ReadUInt16LittleEndian(archive.AsSpan(localHeader + 26));
-                var localExtraSize = BinaryPrimitives.ReadUInt16LittleEndian(archive.AsSpan(localHeader + 28));
-                found = new ZipMember(localHeader, localHeader + 30 + localNameSize + localExtraSize, (int)uncompressedSize, cursor);
+                var localNameSize = BinaryPrimitives.ReadUInt16LittleEndian(local.AsSpan(26));
+                var localExtraSize = BinaryPrimitives.ReadUInt16LittleEndian(local.AsSpan(28));
+                found = new SiMember(localHeader, localHeader + 30 + localNameSize + localExtraSize, (int)uncompressedSize, cursor);
             }
 
             cursor += 46 + nameSize + extraSize + commentSize;
         }
 
         return found ?? throw new InvalidDataException($"SI archive must contain exactly one {name}");
+    }
+
+    private static long GetCntOffset(FileStream stream)
+    {
+        stream.Position = 0x58;
+        var buffer = new byte[8];
+        stream.ReadExactly(buffer);
+        return (long)BinaryPrimitives.ReadUInt64LittleEndian(buffer);
     }
 
     private readonly record struct Entry(uint Id, uint Flags, uint Offset, uint Size);

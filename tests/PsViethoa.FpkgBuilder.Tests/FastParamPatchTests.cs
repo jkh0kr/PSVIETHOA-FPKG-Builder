@@ -9,8 +9,8 @@ namespace PsViethoa.FpkgBuilder.Tests;
 /// <summary>진단용: 실제 패키지(CNT에 param.json 원시 저장)로 "빠른 재봉인" 전 경로를 점검한다 (파일이 없으면 건너뜀).</summary>
 public sealed class FastParamPatchTests
 {
-    private static readonly string Source =
-        @"C:\git\ps5\PPSA01289 [ 01.024 ]-[DLPSGAME.COM]\PPSA01289-app-pkg\UP9000-PPSA01289_00-SACKBOYADVENTURE-A0124-V0124.pkg";
+    private static readonly string Source = Environment.GetEnvironmentVariable("FPKG_FASTPATCH_SOURCE")
+        ?? @"C:\git\UP0102-PPSA02530_00-PRAGMATA00000000-A01200-V01200.pkg";
 
     [Fact]
     public void Patch_ReplacesParamJsonAndReseals()
@@ -21,7 +21,7 @@ public sealed class FastParamPatchTests
         }
 
         // 원본 param.json은 이전에 뽑아 둔 것을 쓴다 (라이브러리가 파일을 물기 전 상태 유지).
-        var rawParam = Path.Combine(Path.GetTempPath(), "opencode", "sackboy-param.json");
+        var rawParam = Path.Combine(Path.GetTempPath(), "opencode", "pragmata-param.json");
         if (!File.Exists(rawParam))
         {
             return;
@@ -31,11 +31,12 @@ public sealed class FastParamPatchTests
         TryDelete(copy);
         try
         {
-            File.Copy(Source, copy);
-
-            const string newTitle = "Sackboy FASTPATCH OK";
+            const string newTitle = "PRAGMATA FASTPATCH OK";
             var node = JsonNode.Parse(File.ReadAllText(rawParam))!.AsObject();
-            node["localizedParameters"]!["en-US"]!["titleName"] = newTitle;
+            var localized = node["localizedParameters"]!.AsObject();
+            var language = localized["defaultLanguage"]?.GetValue<string>() ?? "en-US";
+            var block = localized[language] as JsonObject ?? localized.Where(pair => pair.Value is JsonObject).Select(pair => pair.Value).OfType<JsonObject>().First();
+            block["titleName"] = newTitle;
 
             // GUI 경로 그대로: 에디터는 들여쓰기 본문을 보여주고, 전송 전 컴팩트로 다시 직렬화한다.
             var pretty = node.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
@@ -43,7 +44,10 @@ public sealed class FastParamPatchTests
             var compact = reparsed.ToJsonString(new System.Text.Json.JsonSerializerOptions());
             Assert.True(pretty.Length > compact.Length, "indented text must be larger than compact");
 
-            var report = CntParamPatcher.PatchInPlace(copy, Encoding.UTF8.GetBytes(compact));
+            var bytes = Encoding.UTF8.GetBytes(compact);
+
+            // Đường đầy đủ (Patch): sao chép song song + vá tại chỗ — phủ cả CopyFile.
+            var report = CntParamPatcher.Patch(Source, copy, bytes);
             Assert.True(report.SlotSize > 0);
             Assert.True(report.PaddedBytes >= 0);
             Assert.True(report.ResealedBlocks > 0);
