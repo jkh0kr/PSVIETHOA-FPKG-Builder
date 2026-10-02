@@ -1855,7 +1855,8 @@ public sealed partial class MainViewModel : ObservableObject
         try
         {
             LanguageVi = Loc.Normalize(s.Language) == Loc.Vietnamese;
-            LanguageEn = !LanguageVi;
+            LanguageKo = Loc.Normalize(s.Language) == Loc.Korean;
+            LanguageEn = !LanguageVi && !LanguageKo;
 
             SourcePath = s.SourcePath;
             OutputFolder = s.OutputFolder;
