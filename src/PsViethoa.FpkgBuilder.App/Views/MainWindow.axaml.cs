@@ -1,9 +1,11 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using PsViethoa.FpkgBuilder.App.ViewModels;
 using PsViethoa.FpkgBuilder.Core.Services;
@@ -72,8 +74,63 @@ public partial class MainWindow : Window
             {
                 RebuildEditGutter(vm);
             }
+
+            // Nạp gói mới: đưa con trỏ + cuộn tới khối userDefinedParam1..4 (thường sửa ở đó); không có thì xuống cuối.
+            if (e.PropertyName == nameof(MainViewModel.EditParamOriginalLines))
+            {
+                Dispatcher.UIThread.Post(() => PositionEditParamEditor(vm), DispatcherPriority.Background);
+            }
         };
         RebuildEditGutter(vm);
+    }
+
+    /// <summary>
+    /// Đặt con trỏ tới dòng "userDefinedParam1" (nếu không có thì 2, 3, 4, rồi cuối tệp) và cuộn trình sửa tới đó —
+    /// dòng chữ mono cùng cỡ nên ánh xạ theo tỉ lệ dòng là chính xác.
+    /// </summary>
+    private void PositionEditParamEditor(MainViewModel vm)
+    {
+        var text = EditParamBox.Text;
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        var key = -1;
+        foreach (var name in new[] { "\"userDefinedParam1\"", "\"userDefinedParam2\"", "\"userDefinedParam3\"", "\"userDefinedParam4\"" })
+        {
+            key = text.IndexOf(name, StringComparison.Ordinal);
+            if (key >= 0)
+            {
+                break;
+            }
+        }
+
+        if (key < 0)
+        {
+            key = text.Length;
+        }
+
+        EditParamBox.CaretIndex = Math.Min(key, text.Length);
+        HookEditParamScroller();
+        if (_editParamScroller != null)
+        {
+            var lines = text.Split('\n').Length;
+            var caretLine = 0;
+            for (var i = 0; i < EditParamBox.CaretIndex; i++)
+            {
+                if (text[i] == '\n')
+                {
+                    caretLine++;
+                }
+            }
+
+            var scrollable = Math.Max(0, _editParamScroller.Extent.Height - _editParamScroller.Viewport.Height);
+            var proportional = lines <= 1 ? 0 : Math.Clamp((caretLine - 2.0) / lines, 0, 1);
+            _editParamScroller.Offset = new Vector(0, scrollable * proportional);
+        }
+
+        UpdateEditCaret(vm);
     }
 
     private void HookEditParamScroller()

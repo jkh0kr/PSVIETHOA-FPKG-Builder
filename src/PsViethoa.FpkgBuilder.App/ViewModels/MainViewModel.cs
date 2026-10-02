@@ -2868,9 +2868,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var lastUiAt = stopwatch.Elapsed - TimeSpan.FromSeconds(1);
-        var lastSampleAt = stopwatch.Elapsed;
-        long lastSampleBytes = 0;
-        double bytesPerSecond = 0;
+        TimeSpan? copyStartedAt = null;
 
         return (percent, phase) =>
         {
@@ -2878,18 +2876,18 @@ public sealed partial class MainViewModel : ObservableObject
             {
                 var now = stopwatch.Elapsed;
 
-                // Đo tốc độ theo byte (chỉ giai đoạn sao chép, 0..60%).
+                // Tốc độ HIỂN THỊ là bình quân TÍCH LUỴ (byte đã chép / thời gian chép từ đầu) — không nhấp nhô theo
+                // từng mẫu tức thời; ETA cũng theo bình quân đó nên đi xuống êm thay vì qua lại.
                 long copied = 0;
+                double averageBytesPerSecond = 0;
                 if (phase == "copying")
                 {
                     copied = (long)(totalBytes * Math.Clamp(percent, 0, 60) / 60.0);
-                    var sampleDt = (now - lastSampleAt).TotalSeconds;
-                    if (sampleDt >= 0.3)
+                    copyStartedAt ??= now;
+                    var elapsed = (now - copyStartedAt.Value).TotalSeconds;
+                    if (elapsed > 0.5)
                     {
-                        var instant = (copied - lastSampleBytes) / sampleDt;
-                        bytesPerSecond = bytesPerSecond <= 0 ? instant : bytesPerSecond * 0.7 + instant * 0.3;
-                        lastSampleBytes = copied;
-                        lastSampleAt = now;
+                        averageBytesPerSecond = copied / elapsed;
                     }
                 }
 
@@ -2901,12 +2899,12 @@ public sealed partial class MainViewModel : ObservableObject
                 lastUiAt = now;
                 var whole = (int)Math.Clamp(Math.Round(percent), 0, 100);
                 string text;
-                if (phase == "copying" && bytesPerSecond > 1024 && whole < 60)
+                if (phase == "copying" && averageBytesPerSecond > 1024 && whole < 60)
                 {
-                    // Kẹp ETA vào một ngày: tốc độ đo được quá thấp lúc đầu dễ làm TimeSpan tràn (lỗi "duration is too long").
-                    var etaSeconds = Math.Clamp((totalBytes - copied) / bytesPerSecond, 0, 86400);
+                    // Kẹp ETA vào một ngày để TimeSpan không bao giờ tràn.
+                    var etaSeconds = Math.Clamp((totalBytes - copied) / averageBytesPerSecond, 0, 86400);
                     var remaining = TimeSpan.FromSeconds(etaSeconds);
-                    text = Loc.F("FastParam.PhaseCopy", whole) + Loc.F("FastParam.SpeedEta", Formatters.Size((long)bytesPerSecond) + "/s", Formatters.Duration(remaining));
+                    text = Loc.F("FastParam.PhaseCopy", whole) + Loc.F("FastParam.SpeedEta", Formatters.Size((long)averageBytesPerSecond) + "/s", Formatters.Duration(remaining));
                 }
                 else
                 {
