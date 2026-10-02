@@ -108,6 +108,11 @@ public partial class MainWindow : Window
                 _editChangedLines++;
             }
 
+            if (i > 0)
+            {
+                inlines.Add(new LineBreak());
+            }
+
             var run = new Run { Text = FormattedGutterLine(i + 1, changed) };
             run.Foreground = i == _editCaretLine ? accent : changed ? danger : muted;
             inlines.Add(run);
@@ -119,7 +124,7 @@ public partial class MainWindow : Window
         SyncEditGutter();
     }
 
-    private static string FormattedGutterLine(int number, bool changed) => $"{number,4} {(changed ? "\u25CF" : " ")}\n";
+    private static string FormattedGutterLine(int number, bool changed) => $"{number,4} {(changed ? "\u25CF" : " ")}";
 
     private IBrush? FindBrush(string key) =>
         this.TryFindResource(key, ActualThemeVariant, out var value) && value is IBrush brush ? brush : null;

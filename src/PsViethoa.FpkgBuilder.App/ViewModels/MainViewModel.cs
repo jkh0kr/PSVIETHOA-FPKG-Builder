@@ -2648,7 +2648,11 @@ public sealed partial class MainViewModel : ObservableObject
 
     public bool HasEditPkgError => !string.IsNullOrEmpty(EditPkgError);
 
-    partial void OnHasEditPkgChanged(bool value) => ValidateEditParam();
+    partial void OnHasEditPkgChanged(bool value)
+    {
+        ValidateEditParam();
+        EditExistingPkgCommand.NotifyCanExecuteChanged();
+    }
 
     [RelayCommand]
     private async Task BrowseEditPkgAsync()
@@ -2739,6 +2743,7 @@ public sealed partial class MainViewModel : ObservableObject
             if (!cancellation.IsCancellationRequested)
             {
                 IsInspectingEditPkg = false;
+                EditExistingPkgCommand.NotifyCanExecuteChanged();
             }
 
             OnPropertyChanged(nameof(HasEditPkgError));
@@ -2765,6 +2770,7 @@ public sealed partial class MainViewModel : ObservableObject
             EditParamValid = false;
             EditParamIsError = true;
             EditParamStatus = Loc.T("Param.OverrideEmpty");
+            EditExistingPkgCommand.NotifyCanExecuteChanged();
             return;
         }
 
@@ -2780,6 +2786,8 @@ public sealed partial class MainViewModel : ObservableObject
             EditParamIsError = true;
             EditParamStatus = string.Join("\n", errors);
         }
+
+        EditExistingPkgCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>Nút áp trên trang "Sửa gói": văn bản trong trình sửa lớn được ghi thẳng vào sce_sys tạm rồi dựng bản vá UPDATE.</summary>
