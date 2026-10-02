@@ -1202,15 +1202,21 @@
                     <Border Grid.Row="1" Classes="card">
                         <Grid RowDefinitions="Auto,*,Auto" Margin="0">
                             <TextBlock Classes="label" Text="{l:T Edit.EditorTitle}" />
-                            <TextBox Grid.Row="1" Name="EditParamBox" Classes="mono" AcceptsReturn="True" TextWrapping="NoWrap"
-                                     Text="{Binding EditParamText, Mode=TwoWay}"
-                                     IsReadOnly="{Binding !HasEditPkg}"
-                                     Watermark="{l:T Edit.EditorWatermark}"
-                                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                                     ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                     Margin="0,8,0,10"
-                                     VerticalContentAlignment="Top" />
+                            <Grid Grid.Row="1" ColumnDefinitions="Auto,*">
+                                <Border Background="{DynamicResource BgElevatedBrush}" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,1,1,1" CornerRadius="6,0,0,6" ClipToBounds="True">
+                                    <TextBlock Name="EditParamGutter" Classes="mono" FontSize="13" Margin="8,8,8,8" TextWrapping="NoWrap" Text="" />
+                                </Border>
+                                <TextBox Grid.Column="1" Name="EditParamBox" Classes="mono" FontSize="13" AcceptsReturn="True" TextWrapping="NoWrap"
+                                         Text="{Binding EditParamText, Mode=TwoWay}"
+                                         IsReadOnly="{Binding !HasEditPkg}"
+                                         Watermark="{l:T Edit.EditorWatermark}"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                         Padding="10,8,8,8"
+                                         VerticalContentAlignment="Top" />
+                            </Grid>
                             <StackPanel Grid.Row="2" Spacing="10">
+                                <TextBlock Name="EditParamCaret" Classes="xs muted" TextWrapping="NoWrap" Text="" />
                                 <TextBlock Text="{Binding EditParamStatus}" TextWrapping="Wrap" FontSize="12.5" Classes.error="{Binding EditParamIsError}" />
                                 <Button Classes="primary" FontSize="15" MinHeight="46" Command="{Binding EditExistingPkgCommand}" HorizontalAlignment="Stretch" ToolTip.Tip="{l:T Edit.ButtonTip}">
                                     <StackPanel Orientation="Horizontal" Spacing="8">

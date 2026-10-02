@@ -2643,6 +2643,9 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _editParamIsError;
     [ObservableProperty] private string _editParamStatus = string.Empty;
 
+    /// <summary>Các dòng của bản param.json gốc vừa nạp — để trình sửa trên tab "Sửa gói" tô dòng đã đổi.</summary>
+    public string[] EditParamOriginalLines { get; private set; } = [];
+
     public bool HasEditPkgError => !string.IsNullOrEmpty(EditPkgError);
 
     partial void OnHasEditPkgChanged(bool value) => ValidateEditParam();
@@ -2669,6 +2672,8 @@ public sealed partial class MainViewModel : ObservableObject
         IsInspectingEditPkg = true;
         HasEditPkg = false;
         EditPkgError = string.Empty;
+        EditParamOriginalLines = [];
+        OnPropertyChanged(nameof(EditParamOriginalLines));
         EditParamText = string.Empty;
         EditPkgTitle = Loc.T("Edit.Inspecting");
         EditPkgSubtitle = path;
@@ -2715,6 +2720,8 @@ public sealed partial class MainViewModel : ObservableObject
             {
             }
 
+            EditParamOriginalLines = text.Replace("\r\n", "\n").Split('\n');
+            OnPropertyChanged(nameof(EditParamOriginalLines));
             EditParamText = text;
         }
         catch (OperationCanceledException)

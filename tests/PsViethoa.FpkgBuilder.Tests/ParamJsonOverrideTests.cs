@@ -292,6 +292,25 @@ public class ParamJsonOverrideTests
     }
 
     [Fact]
+    public void TryParseOverride_AcceptsRealWorldMasterVersion()
+    {
+        // param.json thật của PS5: masterVersion "01.00.00" (không phải dạng chuẩn contentVersion) — phải được chấp nhận.
+        Assert.True(ParamJsonPatch.TryParseOverride(
+            """{"contentId": "UP9000-PPSA00001_00-PSVIETHOATEST001", "contentVersion": "01.000.000", "masterVersion": "01.00.00", "sdkVersion": "0x0450000000000000", "requiredSystemSoftwareVersion": "0x0450000000000000", "applicationDrmType": "standard"}""",
+            out var parsed,
+            out var errors));
+        Assert.NotNull(parsed);
+        Assert.Empty(errors);
+
+        Assert.True(ParamJsonPatch.IsValidVersion("01.00.00"));
+        Assert.True(ParamJsonPatch.IsValidVersion("01.00"));
+        Assert.True(ParamJsonPatch.IsValidVersion("01.000.000"));
+        Assert.True(ParamJsonPatch.IsValidVersion("1.0"));
+        Assert.False(ParamJsonPatch.IsValidVersion("abc"));
+        Assert.False(ParamJsonPatch.IsValidVersion(""));
+    }
+
+    [Fact]
     public void MetadataReader_ExposesRawParamJsonText()
     {
         var folder = Path.Combine(Path.GetTempPath(), "fpkg-rawparam-" + Guid.NewGuid().ToString("N"));

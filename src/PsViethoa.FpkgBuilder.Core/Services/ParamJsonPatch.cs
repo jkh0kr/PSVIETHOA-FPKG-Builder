@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using PsViethoa.FpkgBuilder.Core.Localization;
 using PsViethoa.FpkgBuilder.Core.Models;
 
@@ -51,7 +52,7 @@ public readonly record struct ParamJsonPatchOptions(bool ForceStandardDrm, bool 
 /// </item>
 /// </list>
 /// </summary>
-public sealed class ParamJsonPatch : IDisposable
+public sealed partial class ParamJsonPatch : IDisposable
 {
     public const string StandardDrm = "standard";
 
@@ -296,7 +297,7 @@ public sealed class ParamJsonPatch : IDisposable
 
         foreach (var field in MasterVersionFields)
         {
-            if (ReadNonEmptyString(parsed, field) is { } version && !VersionHelper.TryCanonicalize(version, out _))
+            if (ReadNonEmptyString(parsed, field) is { } version && !IsValidVersion(version))
             {
                 issues.Add(Loc.F("Param.OverrideBadVersion", field, version));
             }
@@ -319,6 +320,19 @@ public sealed class ParamJsonPatch : IDisposable
     }
 
     private static readonly string[] MasterVersionFields = [ContentVersionField, "masterVersion"];
+
+    /// <summary>
+    /// Phiên bản hợp lệ: contentVersion dạng chuẩn NN.NNN.NNN (engine bóc được) hoặc dạng cũ của masterVersion
+    /// NN.NN / NN.NN.NN (param.json thật của PS5 dùng "01.00.00") — sau này WriteStandardParam ghi lại nguyên văn.
+    /// </summary>
+    public static bool IsValidVersion(string text)
+    {
+        var trimmed = text.Trim();
+        return VersionHelper.TryCanonicalize(trimmed, out _) || MasterVersionPattern().IsMatch(trimmed);
+    }
+
+    [GeneratedRegex("^[0-9]{2}\\.[0-9]{2}(?:\\.[0-9]{2})?$", RegexOptions.CultureInvariant)]
+    private static partial Regex MasterVersionPattern();
 
     /// <summary>
     /// Đọc phần ghi đè param.json từ tệp (<c>fpkg-cli --param-json</c>): lỗi đọc tệp hay lỗi kiểm tra đều trả về qua

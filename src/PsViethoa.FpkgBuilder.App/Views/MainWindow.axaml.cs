@@ -1,7 +1,10 @@
 using Avalonia.Controls;
+using Avalonia.Controls.Documents;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.VisualTree;
 using PsViethoa.FpkgBuilder.App.ViewModels;
 using PsViethoa.FpkgBuilder.Core.Services;
 using PsViethoa.FpkgBuilder.Core.ExFat;
@@ -12,6 +15,12 @@ public partial class MainWindow : Window
 {
     private bool _closeConfirmed;
     private MainViewModel? _attached;
+
+    // === Tab "Sửa gói": số dòng + tô dòng đã đổi + vị trí con trỏ trong trình sửa lớn ===
+    private ScrollViewer? _editParamScroller;
+    private TranslateTransform? _editGutterTransform;
+    private int _editCaretLine = -1;
+    private int _editChangedLines;
 
     public MainWindow()
     {
@@ -42,7 +51,123 @@ public partial class MainWindow : Window
         {
             _attached.LogAppended += OnLogAppended;
             _attached.FocusFieldRequested += OnFocusFieldRequested;
+            SetupEditParamEditor(_attached);
         }
+    }
+
+    /// <summary>Nối trình sửa lớn của tab "Sửa gói": dựng lại cột số dòng ( tô dòng đã đổi / dòng con trỏ ) mỗi lần văn bản đổi.</summary>
+    private void SetupEditParamEditor(MainViewModel vm)
+    {
+        EditParamBox.TemplateApplied += (_, _) => HookEditParamScroller();
+        EditParamBox.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == TextBox.CaretIndexProperty || e.Property == TextBox.SelectionStartProperty)
+            {
+                UpdateEditCaret(vm);
+            }
+        };
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(MainViewModel.EditParamText) or nameof(MainViewModel.EditParamOriginalLines))
+            {
+                RebuildEditGutter(vm);
+            }
+        };
+        RebuildEditGutter(vm);
+    }
+
+    private void HookEditParamScroller()
+    {
+        var scroller = EditParamBox.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        if (scroller == null || ReferenceEquals(_editParamScroller, scroller))
+        {
+            return;
+        }
+
+        _editParamScroller = scroller;
+        _editGutterTransform = new TranslateTransform();
+        EditParamGutter.RenderTransform = _editGutterTransform;
+        scroller.ScrollChanged += (_, _) => SyncEditGutter();
+        scroller.LayoutUpdated += (_, _) => SyncEditGutter();
+    }
+
+    private void RebuildEditGutter(MainViewModel vm)
+    {
+        var lines = vm.EditParamText.Replace("\r\n", "\n").Split('\n');
+        var original = vm.EditParamOriginalLines;
+        var accent = FindBrush("AccentBrush");
+        var danger = FindBrush("DangerBrush");
+        var muted = FindBrush("TextSecondaryBrush") ?? FindBrush("TextFaintBrush");
+        var inlines = new List<Inline>();
+        _editChangedLines = 0;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var changed = i >= original.Length || lines[i] != original[i];
+            if (changed)
+            {
+                _editChangedLines++;
+            }
+
+            var run = new Run { Text = FormattedGutterLine(i + 1, changed) };
+            run.Foreground = i == _editCaretLine ? accent : changed ? danger : muted;
+            inlines.Add(run);
+        }
+
+        EditParamGutter.Inlines.Clear();
+        EditParamGutter.Inlines.AddRange(inlines);
+        UpdateEditCaretText();
+        SyncEditGutter();
+    }
+
+    private static string FormattedGutterLine(int number, bool changed) => $"{number,4} {(changed ? "\u25CF" : " ")}\n";
+
+    private IBrush? FindBrush(string key) =>
+        this.TryFindResource(key, ActualThemeVariant, out var value) && value is IBrush brush ? brush : null;
+
+    private void UpdateEditCaret(MainViewModel vm)
+    {
+        var text = EditParamBox.Text ?? string.Empty;
+        var index = Math.Clamp(EditParamBox.CaretIndex, 0, text.Length);
+        var slice = text[..index];
+        var line = 0;
+        var lastNewline = -1;
+        for (var i = 0; i < slice.Length; i++)
+        {
+            if (slice[i] == '\n')
+            {
+                line++;
+                lastNewline = i;
+            }
+        }
+
+        _editCaretLine = line;
+        UpdateEditCaretText();
+        RebuildEditGutter(vm);
+    }
+
+    private void UpdateEditCaretText()
+    {
+        if (ViewModel is not MainViewModel vm || !vm.HasEditPkg)
+        {
+            EditParamCaret.Text = string.Empty;
+            return;
+        }
+
+        var changes = _editChangedLines > 0
+            ? PsViethoa.FpkgBuilder.Core.Localization.Loc.F("Edit.ChangedLines", _editChangedLines)
+            : PsViethoa.FpkgBuilder.Core.Localization.Loc.T("Edit.NoChanges");
+        EditParamCaret.Text = $"{PsViethoa.FpkgBuilder.Core.Localization.Loc.F("Edit.CaretPos", _editCaretLine + 1)} · {changes}";
+    }
+
+    private void SyncEditGutter()
+    {
+        if (_editGutterTransform == null || _editParamScroller == null)
+        {
+            return;
+        }
+
+        var max = Math.Max(0, EditParamGutter.Bounds.Height - _editParamScroller.Viewport.Height);
+        _editGutterTransform.Y = Math.Clamp(-_editParamScroller.Offset.Y, -max, 0);
     }
 
     private void OnOpened(object? sender, EventArgs e)
@@ -410,8 +535,30 @@ public partial class MainWindow : Window
         return null;
     }
 
+    private static string? GetDroppedPkg(DragEventArgs e)
+    {
+        try
+        {
+            var items = e.Data.GetFiles();
+            return items?
+                .Select(file => file.TryGetLocalPath())
+                .FirstOrDefault(path => !string.IsNullOrEmpty(path) && path!.EndsWith(".pkg", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     private void OnDragEnter(object? sender, DragEventArgs e)
     {
+        if (ViewModel is { IsEditMode: true })
+        {
+            e.DragEffects = GetDroppedPkg(e) != null ? DragDropEffects.Copy : DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+
         if (ViewModel is { IsQueueMode: true })
         {
             e.DragEffects = QueueView.GetDroppedPaths(e).Count > 0 ? DragDropEffects.Copy : DragDropEffects.None;
@@ -434,6 +581,13 @@ public partial class MainWindow : Window
 
     private void OnDragOver(object? sender, DragEventArgs e)
     {
+        if (ViewModel is { IsEditMode: true })
+        {
+            e.DragEffects = GetDroppedPkg(e) != null ? DragDropEffects.Copy : DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+
         if (ViewModel is { IsQueueMode: true })
         {
             e.DragEffects = QueueView.GetDroppedPaths(e).Count > 0 ? DragDropEffects.Copy : DragDropEffects.None;
@@ -455,6 +609,18 @@ public partial class MainWindow : Window
     private void OnDrop(object? sender, DragEventArgs e)
     {
         DropOverlay.IsVisible = false;
+        if (ViewModel is { IsEditMode: true, IsBuilding: false } editOwner)
+        {
+            var pkg = GetDroppedPkg(e);
+            if (pkg != null)
+            {
+                e.Handled = true;
+                _ = editOwner.InspectEditPkgAsync(pkg);
+            }
+
+            return;
+        }
+
         if (ViewModel is { IsQueueMode: true } queueOwner)
         {
             var paths = QueueView.GetDroppedPaths(e);
