@@ -2867,7 +2867,7 @@ public sealed partial class MainViewModel : ObservableObject
     private Action<double, string> MakeFastPatchProgress(long totalBytes)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var lastUiAt = TimeSpan.MinValue;
+        var lastUiAt = stopwatch.Elapsed - TimeSpan.FromSeconds(1);
         var lastSampleAt = stopwatch.Elapsed;
         long lastSampleBytes = 0;
         double bytesPerSecond = 0;
