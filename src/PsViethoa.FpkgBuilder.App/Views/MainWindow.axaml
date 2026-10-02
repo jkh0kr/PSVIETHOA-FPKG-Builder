@@ -1168,51 +1168,61 @@
 
             <!-- ============ CHẾ ĐỘ SỬA GÓI (.pkg có sẵn) ============ -->
             <Panel Grid.Row="2" IsVisible="{Binding IsEditMode}">
-                <ScrollViewer>
-                    <StackPanel Spacing="14" MaxWidth="880" Width="880" Margin="0,2,0,0" HorizontalAlignment="Left">
-                        <Border Classes="card">
-                            <StackPanel Spacing="12">
-                                <StackPanel Orientation="Horizontal" Spacing="10">
-                                    <Border Width="26" Height="26" CornerRadius="8" Background="{DynamicResource AccentSoftBrush}">
-                                        <PathIcon Width="16" Height="16" Data="{StaticResource IconCodeBrackets}" Foreground="{DynamicResource AccentBrush}" />
-                                    </Border>
-                                    <TextBlock Classes="h2" Text="{l:T Edit.Title}" VerticalAlignment="Center" />
-                                </StackPanel>
-
-                                <StackPanel Classes="field">
-                                    <TextBlock Classes="label" Text="{l:T Edit.PathLabel}" />
-                                    <Grid ColumnDefinitions="*,10,Auto">
-                                        <TextBox Classes="mono" Text="{Binding EditPkgPath, Mode=OneWay}" IsReadOnly="True" Watermark="{l:T Edit.PathWatermark}" />
-                                        <Button Grid.Column="2" MinHeight="38" Command="{Binding BrowseEditPkgCommand}" Content="{l:T Common.Browse}" />
-                                    </Grid>
-                                </StackPanel>
-
-                                <StackPanel Spacing="4" IsVisible="{Binding IsInspectingEditPkg}">
-                                    <TextBlock Classes="hint" Text="{l:T Edit.Inspecting}" />
-                                </StackPanel>
-
-                                <StackPanel Spacing="4" IsVisible="{Binding HasEditPkg}">
-                                    <TextBlock Text="{Binding EditPkgTitle}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                    <SelectableTextBlock Classes="xs mono muted" Text="{Binding EditPkgSubtitle}" TextWrapping="Wrap" />
-                                </StackPanel>
-
-                                <TextBlock Classes="error" Text="{Binding EditPkgError}" IsVisible="{Binding HasEditPkgError}" TextWrapping="Wrap" Margin="0,2,0,0" />
+                <Grid RowDefinitions="Auto,*" MaxWidth="1080" Margin="0,2,0,0" HorizontalAlignment="Left">
+                    <Border Classes="card" Margin="0,0,0,14">
+                        <StackPanel Spacing="12">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Border Width="26" Height="26" CornerRadius="8" Background="{DynamicResource AccentSoftBrush}">
+                                    <PathIcon Width="16" Height="16" Data="{StaticResource IconCodeBrackets}" Foreground="{DynamicResource AccentBrush}" />
+                                </Border>
+                                <TextBlock Classes="h2" Text="{l:T Edit.Title}" VerticalAlignment="Center" />
                             </StackPanel>
-                        </Border>
 
-                        <Border Classes="card">
-                            <StackPanel Spacing="10">
+                            <StackPanel Classes="field">
+                                <TextBlock Classes="label" Text="{l:T Edit.PathLabel}" />
+                                <Grid ColumnDefinitions="*,10,Auto">
+                                    <TextBox Classes="mono" Text="{Binding EditPkgPath, Mode=OneWay}" IsReadOnly="True" Watermark="{l:T Edit.PathWatermark}" />
+                                    <Button Grid.Column="2" MinHeight="38" Command="{Binding BrowseEditPkgCommand}" Content="{l:T Common.Browse}" />
+                                </Grid>
+                            </StackPanel>
+
+                            <StackPanel Spacing="4" IsVisible="{Binding IsInspectingEditPkg}">
+                                <TextBlock Classes="hint" Text="{l:T Edit.Inspecting}" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="4" IsVisible="{Binding HasEditPkg}">
+                                <TextBlock Text="{Binding EditPkgTitle}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                <SelectableTextBlock Classes="xs mono muted" Text="{Binding EditPkgSubtitle}" TextWrapping="Wrap" />
+                            </StackPanel>
+
+                            <TextBlock Classes="error" Text="{Binding EditPkgError}" IsVisible="{Binding HasEditPkgError}" TextWrapping="Wrap" Margin="0,2,0,0" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Row="1" Classes="card">
+                        <Grid RowDefinitions="Auto,*,Auto" Margin="0">
+                            <TextBlock Classes="label" Text="{l:T Edit.EditorTitle}" />
+                            <TextBox Grid.Row="1" Name="EditParamBox" Classes="mono" AcceptsReturn="True" TextWrapping="NoWrap"
+                                     Text="{Binding EditParamText, Mode=TwoWay}"
+                                     IsReadOnly="{Binding !HasEditPkg}"
+                                     Watermark="{l:T Edit.EditorWatermark}"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                     Margin="0,8,0,10"
+                                     VerticalContentAlignment="Top" />
+                            <StackPanel Grid.Row="2" Spacing="10">
+                                <TextBlock Text="{Binding EditParamStatus}" TextWrapping="Wrap" FontSize="12.5" Classes.error="{Binding EditParamIsError}" />
                                 <Button Classes="primary" FontSize="15" MinHeight="46" Command="{Binding EditExistingPkgCommand}" HorizontalAlignment="Stretch" ToolTip.Tip="{l:T Edit.ButtonTip}">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <PathIcon Data="{StaticResource IconCodeBrackets}" />
-                                        <TextBlock Text="{l:T Edit.Button}" />
+                                        <TextBlock Text="{l:T Edit.Apply}" />
                                     </StackPanel>
                                 </Button>
                                 <SelectableTextBlock Classes="hint" TextWrapping="Wrap" Text="{l:T Edit.Hint}" />
                             </StackPanel>
-                        </Border>
-                    </StackPanel>
-                </ScrollViewer>
+                        </Grid>
+                    </Border>
+                </Grid>
             </Panel>
 
             <!-- ============ CHẾ ĐỘ HÀNG CHỜ ============ -->

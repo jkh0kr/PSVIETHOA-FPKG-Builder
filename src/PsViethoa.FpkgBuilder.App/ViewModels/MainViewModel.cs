@@ -2588,7 +2588,7 @@ public sealed partial class MainViewModel : ObservableObject
     /// </summary>
     private async Task EditPackageDirectAsync(PackageInfo info, string passcode)
     {
-        var raw = info.ParamJsonBytes is { Length: > 0 } bytes ? Encoding.UTF8.GetString(bytes) : null;
+        var raw = info.ParamJsonBytes is { Length: > 0 } bytes ? System.Text.Encoding.UTF8.GetString(bytes) : null;
         var title = Loc.T("ParamEditor.Title");
         var (saved, _, edited) = await _dialogs.EditParamJsonAsync(title, raw, null);
         if (!saved || edited == null)
@@ -2596,13 +2596,20 @@ public sealed partial class MainViewModel : ObservableObject
             return;
         }
 
+        await ApplyEditedPkgAsync(info, passcode, edited);
+    }
+
+    /// <summary>Ghi param.json đã sửa vào sce_sys tạm cạnh .pkg rồi dựng lượt tạo BẢN VÁ (delta) trên chính gói đó.</summary>
+    private async Task ApplyEditedPkgAsync(PackageInfo info, string passcode, string editedJson)
+    {
+        var title = Loc.T("ParamEditor.Title");
         string folder;
         try
         {
             folder = Path.Combine(Path.GetDirectoryName(info.Path) ?? string.Empty, Path.GetFileNameWithoutExtension(info.Path) + "-edit");
             Directory.CreateDirectory(Path.Combine(folder, "sce_sys"));
             await Task.Run(() => PackageReader.ExportSceSys(info.Path, folder, passcode, CancellationToken.None));
-            await File.WriteAllTextAsync(Path.Combine(folder, "sce_sys", "param.json"), edited, new System.Text.UTF8Encoding(false));
+            await File.WriteAllTextAsync(Path.Combine(folder, "sce_sys", "param.json"), editedJson, new System.Text.UTF8Encoding(false));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -2622,6 +2629,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     private PackageInfo? _editInfo;
     private CancellationTokenSource? _editInspectCancellation;
+    private static readonly System.Text.Json.JsonDocumentOptions EditJsonDocumentOptions = new() { AllowTrailingCommas = true, CommentHandling = System.Text.Json.JsonCommentHandling.Skip };
+    private static readonly System.Text.Json.JsonSerializerOptions EditJsonWriteOptions = new() { WriteIndented = true };
 
     [ObservableProperty] private string _editPkgPath = string.Empty;
     [ObservableProperty] private bool _isInspectingEditPkg;
@@ -2629,8 +2638,14 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _editPkgTitle = string.Empty;
     [ObservableProperty] private string _editPkgSubtitle = string.Empty;
     [ObservableProperty] private string _editPkgError = string.Empty;
+    [ObservableProperty] private string _editParamText = string.Empty;
+    [ObservableProperty] private bool _editParamValid = true;
+    [ObservableProperty] private bool _editParamIsError;
+    [ObservableProperty] private string _editParamStatus = string.Empty;
 
     public bool HasEditPkgError => !string.IsNullOrEmpty(EditPkgError);
+
+    partial void OnHasEditPkgChanged(bool value) => ValidateEditParam();
 
     [RelayCommand]
     private async Task BrowseEditPkgAsync()
@@ -2654,6 +2669,7 @@ public sealed partial class MainViewModel : ObservableObject
         IsInspectingEditPkg = true;
         HasEditPkg = false;
         EditPkgError = string.Empty;
+        EditParamText = string.Empty;
         EditPkgTitle = Loc.T("Edit.Inspecting");
         EditPkgSubtitle = path;
         var cancellation = new CancellationTokenSource();
@@ -2682,7 +2698,24 @@ public sealed partial class MainViewModel : ObservableObject
             if (info.ParamJsonBytes is not { Length: > 0 })
             {
                 EditPkgError = Loc.T("Edit.NoParam");
+                EditParamText = string.Empty;
+                return;
             }
+
+            // Mở sẵn vào trình sửa lớn: định dạng thụt đầu dòng cho dễ đọc; JSON hỏng thì giữ nguyên bản text.
+            var text = System.Text.Encoding.UTF8.GetString(info.ParamJsonBytes);
+            try
+            {
+                if (System.Text.Json.Nodes.JsonNode.Parse(text, documentOptions: EditJsonDocumentOptions) is System.Text.Json.Nodes.JsonObject pretty)
+                {
+                    text = pretty.ToJsonString(EditJsonWriteOptions);
+                }
+            }
+            catch (System.Text.Json.JsonException)
+            {
+            }
+
+            EditParamText = text;
         }
         catch (OperationCanceledException)
         {
@@ -2705,8 +2738,44 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
-    private bool CanEditExistingPkg => HasEditPkg && !IsBuilding && !IsInspectingEditPkg;
+    private bool CanEditExistingPkg => HasEditPkg && !IsBuilding && !IsInspectingEditPkg && EditParamValid;
 
+    /// <summary>Kiểm tra văn bản đang sửa (chạy lại mỗi lần gõ): báo lỗi ngay trên trang, nút áp chỉ bật khi hợp lệ.</summary>
+    partial void OnEditParamTextChanged(string value) => ValidateEditParam();
+
+    private void ValidateEditParam()
+    {
+        if (!HasEditPkg)
+        {
+            EditParamValid = true;
+            EditParamIsError = false;
+            EditParamStatus = string.Empty;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(EditParamText))
+        {
+            EditParamValid = false;
+            EditParamIsError = true;
+            EditParamStatus = Loc.T("Param.OverrideEmpty");
+            return;
+        }
+
+        if (ParamJsonPatch.TryParseOverride(EditParamText, out var parsed, out var errors))
+        {
+            EditParamValid = true;
+            EditParamIsError = false;
+            EditParamStatus = Loc.F("Edit.ValidJson", parsed!.Count);
+        }
+        else
+        {
+            EditParamValid = false;
+            EditParamIsError = true;
+            EditParamStatus = string.Join("\n", errors);
+        }
+    }
+
+    /// <summary>Nút áp trên trang "Sửa gói": văn bản trong trình sửa lớn được ghi thẳng vào sce_sys tạm rồi dựng bản vá UPDATE.</summary>
     [RelayCommand(CanExecute = nameof(CanEditExistingPkg))]
     private async Task EditExistingPkgAsync()
     {
@@ -2716,7 +2785,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
 
         // Sửa xong thì chuyển sang chế độ tạo gói (bản vá) — ở lại tab này chỉ khi người dùng bỏ hộp thoại.
-        await EditPackageDirectAsync(info, Passcode);
+        await ApplyEditedPkgAsync(info, Passcode, EditParamText);
     }
 
     /// <summary>Tìm phần ghi đè param.json đã lưu cho một nguồn (khoá so không phân biệt hoa/thường như đường dẫn Windows).</summary>
