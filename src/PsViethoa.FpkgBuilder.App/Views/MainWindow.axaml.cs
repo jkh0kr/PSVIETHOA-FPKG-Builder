@@ -70,7 +70,7 @@ public partial class MainWindow : Window
             _ = CaptureAndExitAsync(screenshotPath);
         }
 
-        // Đổi ngôn ngữ lúc chạy trước khi chụp (kiểm thử binding {l:T}): PSVIETHOA_SWITCH_LANG=en|vi
+        // Đổi ngôn ngữ lúc chạy trước khi chụp (kiểm thử binding {l:T}): PSVIETHOA_SWITCH_LANG=en|vi|ko
         var switchLanguage = Environment.GetEnvironmentVariable("PSVIETHOA_SWITCH_LANG");
         if (!string.IsNullOrWhiteSpace(switchLanguage) && ViewModel != null)
         {
@@ -80,6 +80,10 @@ public partial class MainWindow : Window
                 if (target == "en")
                 {
                     ViewModel.LanguageEn = true;
+                }
+                else if (target == "ko")
+                {
+                    ViewModel.LanguageKo = true;
                 }
                 else
                 {

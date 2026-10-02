@@ -119,8 +119,9 @@
                         </Border>
                         <Border Background="#1AFFFFFF" BorderBrush="#2EFFFFFF" BorderThickness="1" CornerRadius="8" Padding="3" ToolTip.Tip="{l:T Header.LanguageTip}">
                             <StackPanel Orientation="Horizontal" Spacing="2">
-                                <RadioButton Classes="lang" Theme="{StaticResource SegmentRadio}" GroupName="lang" Content="VI" IsChecked="{Binding LanguageVi, Mode=TwoWay}" />
-                                <RadioButton Classes="lang" Theme="{StaticResource SegmentRadio}" GroupName="lang" Content="EN" IsChecked="{Binding LanguageEn, Mode=TwoWay}" />
+                        <RadioButton Classes="lang" Theme="{StaticResource SegmentRadio}" GroupName="lang" Content="VI" IsChecked="{Binding LanguageVi, Mode=TwoWay}" />
+                        <RadioButton Classes="lang" Theme="{StaticResource SegmentRadio}" GroupName="lang" Content="EN" IsChecked="{Binding LanguageEn, Mode=TwoWay}" />
+                        <RadioButton Classes="lang" Theme="{StaticResource SegmentRadio}" GroupName="lang" Content="KO" IsChecked="{Binding LanguageKo, Mode=TwoWay}" />
                             </StackPanel>
                         </Border>
                         <Button Classes="header icon" Command="{Binding CheckUpdateCommand}" IsEnabled="{Binding !IsCheckingUpdate}" ToolTip.Tip="{l:T Update.Tip}" AutomationProperties.Name="{l:T Update.Tip}">

@@ -7,18 +7,20 @@ namespace PsViethoa.FpkgBuilder.Core.Localization;
 public sealed record LanguageOption(string Code, string Name);
 
 /// <summary>
-/// Bảng chuỗi đa ngôn ngữ (vi/en) nạp từ tài nguyên nhúng Localization/*.json.
+/// Bảng chuỗi đa ngôn ngữ (vi/en/ko) nạp từ tài nguyên nhúng Localization/*.json.
 /// Đổi ngôn ngữ lúc chạy: các binding tới chỉ mục this[key] được cập nhật qua PropertyChanged("Item[]").
 /// </summary>
 public sealed class Loc : INotifyPropertyChanged
 {
     public const string Vietnamese = "vi";
     public const string English = "en";
+    public const string Korean = "ko";
 
     public static IReadOnlyList<LanguageOption> Languages { get; } =
     [
         new(Vietnamese, "Tiếng Việt"),
         new(English, "English"),
+        new(Korean, "한국어"),
     ];
 
     public static Loc Current { get; } = new();
@@ -69,12 +71,21 @@ public sealed class Loc : INotifyPropertyChanged
     }
 
     public static string Normalize(string? code) =>
-        code != null && code.StartsWith("en", StringComparison.OrdinalIgnoreCase) ? English : Vietnamese;
+        code switch
+        {
+            null => Vietnamese,
+            _ when code.StartsWith("en", StringComparison.OrdinalIgnoreCase) => English,
+            _ when code.StartsWith("ko", StringComparison.OrdinalIgnoreCase) => Korean,
+            _ => Vietnamese,
+        };
 
     public static string DetectSystemLanguage() =>
-        string.Equals(CultureInfo.CurrentUICulture.TwoLetterISOLanguageName, "vi", StringComparison.OrdinalIgnoreCase)
-            ? Vietnamese
-            : English;
+        CultureInfo.CurrentUICulture.TwoLetterISOLanguageName switch
+        {
+            "vi" => Vietnamese,
+            "ko" => Korean,
+            _ => English,
+        };
 
     public void SetLanguage(string? code)
     {

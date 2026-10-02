@@ -21,46 +21,57 @@ public sealed class CrossPlatformTests
         return JsonSerializer.Deserialize<Dictionary<string, string>>(stream)!;
     }
 
-    [Fact]
-    public void Localization_BothLanguagesHaveTheSameKeys()
+    public static IEnumerable<object[]> LanguageCodes()
     {
-        var vi = LoadLanguage("vi");
+        yield return ["vi"];
+        yield return ["en"];
+        yield return ["ko"];
+    }
+
+    [Fact]
+    public void Localization_AllLanguagesHaveTheSameKeys()
+    {
         var en = LoadLanguage("en");
-        Assert.Empty(vi.Keys.Except(en.Keys).Order());
-        Assert.Empty(en.Keys.Except(vi.Keys).Order());
-        Assert.All(vi, pair => Assert.False(string.IsNullOrWhiteSpace(pair.Value), pair.Key));
-        Assert.All(en, pair => Assert.False(string.IsNullOrWhiteSpace(pair.Value), pair.Key));
+        foreach (var code in LanguageCodes().Select(row => (string)row[0]))
+        {
+            var table = LoadLanguage(code);
+            Assert.Empty(table.Keys.Except(en.Keys).Order());
+            Assert.Empty(en.Keys.Except(table.Keys).Order());
+            Assert.All(table, pair => Assert.False(string.IsNullOrWhiteSpace(pair.Value), $"{code}:{pair.Key}"));
+        }
     }
 
     [Fact]
     public void Localization_PlaceholdersMatchBetweenLanguages()
     {
-        var vi = LoadLanguage("vi");
         var en = LoadLanguage("en");
         var placeholder = new Regex(@"\{(\d+)(?:[:,][^}]*)?\}");
         var mismatched = new List<string>();
-        foreach (var (key, english) in en)
+        foreach (var code in LanguageCodes().Select(row => (string)row[0]))
         {
-            if (!vi.TryGetValue(key, out var vietnamese))
+            var table = LoadLanguage(code);
+            foreach (var (key, english) in en)
             {
-                continue;
-            }
+                if (!table.TryGetValue(key, out var translated))
+                {
+                    continue;
+                }
 
-            var a = placeholder.Matches(english).Select(m => m.Groups[1].Value).Distinct().Order().ToArray();
-            var b = placeholder.Matches(vietnamese).Select(m => m.Groups[1].Value).Distinct().Order().ToArray();
-            if (!a.SequenceEqual(b))
-            {
-                mismatched.Add(key);
+                var a = placeholder.Matches(english).Select(m => m.Groups[1].Value).Distinct().Order().ToArray();
+                var b = placeholder.Matches(translated).Select(m => m.Groups[1].Value).Distinct().Order().ToArray();
+                if (!a.SequenceEqual(b))
+                {
+                    mismatched.Add($"{code}:{key}");
+                }
             }
         }
 
         Assert.Empty(mismatched);
     }
 
-    /// <summary>Chuỗi có tham số phải định dạng được (không thừa/thiếu ngoặc nhọn) ở cả hai ngôn ngữ.</summary>
+    /// <summary>Chuỗi có tham số phải định dạng được (không thừa/thiếu ngoặc nhọn) ở mọi ngôn ngữ.</summary>
     [Theory]
-    [InlineData("vi")]
-    [InlineData("en")]
+    [MemberData(nameof(LanguageCodes))]
     public void Localization_EveryStringIsAValidFormatString(string code)
     {
         var broken = new List<string>();
