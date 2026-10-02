@@ -2597,7 +2597,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
 
         await ApplyEditedPkgAsync(info, passcode, edited);
-        await RunEditedPatchBuildAsync();
+        await RunEditedPatchBuildAsync(info);
     }
 
     /// <summary>Ghi param.json đã sửa vào sce_sys tạm cạnh .pkg rồi dựng lượt tạo BẢN VÁ (delta) trên chính gói đó.</summary>
@@ -2801,15 +2801,16 @@ public sealed partial class MainViewModel : ObservableObject
         }
 
         await ApplyEditedPkgAsync(info, Passcode, EditParamText);
-        await RunEditedPatchBuildAsync();
+        await RunEditedPatchBuildAsync(info);
     }
 
     /// <summary>
     /// Sau khi áp chỉnh sửa (tab "Sửa gói" hoặc hộp thoại ở chế độ giải nén): chờ đọc metadata của thư mục -edit và thông tin
-    /// gói gốc xong, tự nâng contentVersion khi chưa cao hơn gói gốc (nút bump vốn có) rồi gọi Tạo gói luôn — nút hứa
-    /// "Lưu &amp; tạo bản vá" nên người dùng không phải bấm thêm lần nữa.
+    /// gói gốc xong, tự nâng contentVersion khi chưa cao hơn gói gốc (nút bump vốn có) rồi HỎI có tạo gói ngay không — tạo
+    /// UPDATE là nén lại toàn bộ game một lần (PS5 không có cách sửa param.json không nén lại), nên người dùng phải biết và
+    /// chọn thay vì để tự chạy.
     /// </summary>
-    private async Task RunEditedPatchBuildAsync()
+    private async Task RunEditedPatchBuildAsync(PackageInfo info)
     {
         for (var i = 0; i < 75; i++)
         {
@@ -2826,7 +2827,19 @@ public sealed partial class MainViewModel : ObservableObject
             BumpVersion();
         }
 
-        await BuildAsync();
+        var build = await _dialogs.ConfirmAsync(
+            Loc.T("Edit.AutoBuildTitle"),
+            Loc.F("Edit.AutoBuildBody", Formatters.Size(info.FileSize)),
+            Loc.T("Edit.AutoBuildNow"),
+            Loc.T("Edit.AutoBuildLater"));
+        if (build)
+        {
+            await BuildAsync();
+        }
+        else
+        {
+            Log(LogLevel.Info, Loc.T("Edit.AutoBuildLaterLog"));
+        }
     }
 
     /// <summary>Tìm phần ghi đè param.json đã lưu cho một nguồn (khoá so không phân biệt hoa/thường như đường dẫn Windows).</summary>
