@@ -2816,12 +2816,15 @@ public sealed partial class MainViewModel : ObservableObject
         }
 
         IsFastPatching = true;
+        FastPatchPercent = 0;
+        FastPatchText = Loc.F("FastParam.PhaseCopy", 0);
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             Log(LogLevel.Info, Loc.F("FastParam.Running", Formatters.Size(info.FileSize)));
             var source = info.Path;
             var passcode = Passcode;
+            var progress = MakeFastPatchProgress();
 
             // Trình sửa hiển thị bản THỤT ĐẦU DÒNG cho dễ đọc — khe CNT chỉ rộng bằng param.json gốc, gửi nguyên bản
             // indented sẽ tràn khe. Đóng gói lại COMPACT (giữ nguyên mọi giá trị đã sửa) trước khi vá.
@@ -2838,7 +2841,7 @@ public sealed partial class MainViewModel : ObservableObject
             }
 
             var bytes = System.Text.Encoding.UTF8.GetBytes(payload);
-            var report = await Task.Run(() => CntParamPatcher.Patch(source, target, bytes, (percent, _) => { }, CancellationToken.None));
+            var report = await Task.Run(() => CntParamPatcher.Patch(source, target, bytes, progress, CancellationToken.None));
 
             // Đọc lại bản sao để báo đúng những gì ghi được.
             var after = await Task.Run(() => PackageInspector.Inspect(target, passcode, CancellationToken.None));
@@ -2875,6 +2878,38 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     [ObservableProperty] private bool _isFastPatching;
+    [ObservableProperty] private double _fastPatchPercent;
+    [ObservableProperty] private string _fastPatchText = string.Empty;
+
+    /// <summary>Đưa tiến độ của CntParamPatcher (luồng nền) lên hai thuộc tính hiển thị, tiết chế theo từng % nguyên.</summary>
+    private Action<double, string> MakeFastPatchProgress()
+    {
+        var lastPercent = -1;
+        return (percent, phase) =>
+        {
+            var whole = (int)Math.Clamp(Math.Round(percent), 0, 100);
+            if (whole == lastPercent)
+            {
+                return;
+            }
+
+            lastPercent = whole;
+            var text = phase switch
+            {
+                "copying" => Loc.F("FastParam.PhaseCopy", whole),
+                "re-sealing CNT" => Loc.F("FastParam.PhaseSeal", whole),
+                "rebuilding SI PlayGo CRCs" => Loc.F("FastParam.PhaseCrc", whole),
+                "done" => Loc.T("FastParam.PhaseDone"),
+                _ => $"{whole:0}%",
+            };
+
+            Dispatcher.UIThread.Post(() =>
+            {
+                FastPatchPercent = whole;
+                FastPatchText = text;
+            });
+        };
+    }
 
     /// <summary>Nút áp trên trang "Sửa gói": văn bản trong trình sửa lớn được ghi thẳng vào sce_sys tạm rồi dựng bản vá UPDATE.</summary>
     [RelayCommand(CanExecute = nameof(CanEditExistingPkg))]

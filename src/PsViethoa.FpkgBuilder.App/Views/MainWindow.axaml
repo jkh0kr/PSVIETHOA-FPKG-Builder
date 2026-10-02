@@ -1230,6 +1230,10 @@
                                         <TextBlock Text="{l:T FastParam.Button}" />
                                     </StackPanel>
                                 </Button>
+                                <StackPanel Spacing="6" IsVisible="{Binding IsFastPatching}" Margin="0,2,0,0">
+                                    <TextBlock Classes="xs muted" Text="{Binding FastPatchText}" />
+                                    <ProgressBar Minimum="0" Maximum="100" Value="{Binding FastPatchPercent}" Height="6" />
+                                </StackPanel>
                                 <SelectableTextBlock Classes="hint" TextWrapping="Wrap" Text="{l:T Edit.Hint}" />
                             </StackPanel>
                         </Grid>
