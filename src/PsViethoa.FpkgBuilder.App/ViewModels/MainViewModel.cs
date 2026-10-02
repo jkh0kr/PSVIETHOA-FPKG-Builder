@@ -2849,16 +2849,15 @@ public sealed partial class MainViewModel : ObservableObject
 
     private CancellationTokenSource? _fastPatchCancellation;
 
-    private bool CanCancelFastPatch => IsFastPatching;
-
-    [RelayCommand(CanExecute = nameof(CanCancelFastPatch))]
+    // Nút Huỷ luôn bật khi đang vá (IsVisible đã khớp IsFastPatching) — không phụ thuộc CanExecute/Notify nữa cho chắc.
+    [RelayCommand]
     private void CancelFastPatch() => _fastPatchCancellation?.Cancel();
 
     [ObservableProperty] private bool _isFastPatching;
     [ObservableProperty] private double _fastPatchPercent;
     [ObservableProperty] private string _fastPatchText = string.Empty;
 
-    partial void OnIsFastPatchingChanged(bool value) => CancelFastPatchCommand.NotifyCanExecuteChanged();
+    // Nút Huỷ không còn CanExecute — không cần báo gì khi IsFastPatching đổi.
 
     /// <summary>
     /// Đưa tiến độ của CntParamPatcher (luồng nền) lên hai thuộc tính hiển thị. Giai đoạn sao chép chiếm 0..60% tỉ lệ với
@@ -3523,6 +3522,13 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Gọi khi cửa sổ đóng; trả về true nếu được phép đóng.</summary>
     public async Task<bool> ConfirmCloseAsync()
     {
+        // Đang vá nhanh: huỷ ngay rồi đóng — không để bản sao 29 GB chạy tiếp trong nền sau khi cửa sổ biến mất
+        // (process tưởng đã thoát mà vẫn chiếm đĩa/CPU → "process không thoát được").
+        if (IsFastPatching)
+        {
+            _fastPatchCancellation?.Cancel();
+        }
+
         if (!IsBuilding && !Queue.IsRunning)
         {
             _metadataCancellation?.Cancel();
