@@ -1225,8 +1225,11 @@
                                 </StackPanel>
                             </Button>
                             <StackPanel Spacing="6" IsVisible="{Binding IsFastPatching}" Margin="0,2,0,0">
+                                <Grid ColumnDefinitions="*,10,Auto">
+                                    <ProgressBar Minimum="0" Maximum="100" Value="{Binding FastPatchPercent}" Height="6" VerticalAlignment="Center" />
+                                    <Button Grid.Column="2" MinHeight="30" MinWidth="96" Command="{Binding CancelFastPatchCommand}" Content="{l:T Common.Cancel}" />
+                                </Grid>
                                 <TextBlock Classes="xs muted" Text="{Binding FastPatchText}" />
-                                <ProgressBar Minimum="0" Maximum="100" Value="{Binding FastPatchPercent}" Height="6" />
                             </StackPanel>
                                 <SelectableTextBlock Classes="hint" TextWrapping="Wrap" Text="{l:T Edit.Hint}" />
                             </StackPanel>

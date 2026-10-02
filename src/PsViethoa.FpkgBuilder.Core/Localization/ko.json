@@ -1069,6 +1069,7 @@
   "FastParam.PhaseSeal": "CNT 재봉인 중… {0}%",
   "FastParam.PhaseCrc": "SI PlayGo CRC 수리 중… {0}%",
   "FastParam.PhaseDone": "완료.",
+  "FastParam.Canceled": "빠른 재봉인 취소됨 — 작성 중이던 파일은 삭제했습니다.",
   "Queue.Title": "빌드 큐",
   "Queue.AddFolder": "폴더 추가…",
   "Queue.AddFolderTip": "게임 폴더 하나 추가 — 또는 게임 여러 개가 있는 드라이브/폴더를 선택하면 유효한 하위 폴더 전체가 추가됩니다",

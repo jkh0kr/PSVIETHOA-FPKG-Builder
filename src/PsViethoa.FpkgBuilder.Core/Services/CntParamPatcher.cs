@@ -40,6 +40,7 @@ public static class CntParamPatcher
     /// <summary>Vá tại chỗ (tệp đích đã là bản sao). Tiện cho kiểm thử.</summary>
     public static CntParamPatchReport PatchInPlace(string path, byte[] newParamJson, Action<double, string>? progress = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         using var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None, 1 << 20, FileOptions.RandomAccess);
         var fileSize = stream.Length;
         var fih = ReadExact(stream, 0, 0x1000);

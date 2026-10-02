@@ -1066,6 +1066,7 @@
   "FastParam.PhaseSeal": "Re-sealing the CNT… {0}%",
   "FastParam.PhaseCrc": "Repairing SI PlayGo CRCs… {0}%",
   "FastParam.PhaseDone": "Done.",
+  "FastParam.Canceled": "Fast re-seal cancelled — the partially written file was deleted.",
   "Queue.Title": "Build queue",
   "Queue.AddFolder": "Add folder…",
   "Queue.AddFolderTip": "Add one game folder — or pick a drive/folder that holds many games to add every valid sub-folder",

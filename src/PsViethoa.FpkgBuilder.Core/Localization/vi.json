@@ -1066,6 +1066,7 @@
   "FastParam.PhaseSeal": "Đang niêm phong lại CNT… {0}%",
   "FastParam.PhaseCrc": "Đang sửa CRC PlayGo của SI… {0}%",
   "FastParam.PhaseDone": "Xong.",
+  "FastParam.Canceled": "Đã huỷ vá nhanh — tệp đang ghi dở đã bị xoá.",
   "Queue.Title": "Hàng chờ tạo gói",
   "Queue.AddFolder": "Thêm thư mục…",
   "Queue.AddFolderTip": "Thêm một thư mục game — hoặc chọn cả ổ/thư mục chứa nhiều game để thêm tất cả thư mục con hợp lệ",

@@ -2770,6 +2770,9 @@ public sealed partial class MainViewModel : ObservableObject
         FastPatchPercent = 0;
         FastPatchText = Loc.F("FastParam.PhaseCopy", 0);
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        _fastPatchCancellation?.Dispose();
+        _fastPatchCancellation = new CancellationTokenSource();
+        var cancellation = _fastPatchCancellation;
         try
         {
             Log(LogLevel.Info, Loc.F("FastParam.Running", Formatters.Size(info.FileSize)));
@@ -2792,7 +2795,7 @@ public sealed partial class MainViewModel : ObservableObject
             }
 
             var bytes = System.Text.Encoding.UTF8.GetBytes(payload);
-            var report = await Task.Run(() => CntParamPatcher.Patch(source, target, bytes, progress, CancellationToken.None));
+            var report = await Task.Run(() => CntParamPatcher.Patch(source, target, bytes, progress, cancellation.Token), cancellation.Token);
 
             // Đọc lại bản sao để báo đúng những gì ghi được.
             var after = await Task.Run(() => PackageInspector.Inspect(target, passcode, CancellationToken.None));
@@ -2805,6 +2808,21 @@ public sealed partial class MainViewModel : ObservableObject
             {
                 Log(LogLevel.Warning, Loc.F("FastParam.VerifyNote", after.ParamJsonError ?? "—", "—"));
             }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            try
+            {
+                if (File.Exists(target))
+                {
+                    File.Delete(target);
+                }
+            }
+            catch (Exception)
+            {
+            }
+
+            Log(LogLevel.Warning, Loc.T("FastParam.Canceled"));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -2825,8 +2843,16 @@ public sealed partial class MainViewModel : ObservableObject
         {
             IsFastPatching = false;
             FastPatchCommand.NotifyCanExecuteChanged();
+            CancelFastPatchCommand.NotifyCanExecuteChanged();
         }
     }
+
+    private CancellationTokenSource? _fastPatchCancellation;
+
+    private bool CanCancelFastPatch => IsFastPatching;
+
+    [RelayCommand(CanExecute = nameof(CanCancelFastPatch))]
+    private void CancelFastPatch() => _fastPatchCancellation?.Cancel();
 
     [ObservableProperty] private bool _isFastPatching;
     [ObservableProperty] private double _fastPatchPercent;
