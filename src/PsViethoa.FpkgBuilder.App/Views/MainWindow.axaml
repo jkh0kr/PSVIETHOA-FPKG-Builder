@@ -1218,20 +1218,12 @@
                             <StackPanel Grid.Row="2" Spacing="10">
                                 <TextBlock Name="EditParamCaret" Classes="xs muted" TextWrapping="NoWrap" Text="" />
                                 <TextBlock Text="{Binding EditParamStatus}" TextWrapping="Wrap" FontSize="12.5" Classes.error="{Binding EditParamIsError}" />
-                            <Grid ColumnDefinitions="*,10,*">
-                                <Button Classes="primary" FontSize="14" MinHeight="46" Command="{Binding EditExistingPkgCommand}" HorizontalAlignment="Stretch" ToolTip.Tip="{l:T Edit.ButtonTip}">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <PathIcon Data="{StaticResource IconCodeBrackets}" />
-                                        <TextBlock Text="{l:T Edit.Apply}" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </Button>
-                                <Button Grid.Column="2" FontSize="14" MinHeight="46" Command="{Binding FastPatchCommand}" IsEnabled="{Binding !IsFastPatching}" HorizontalAlignment="Stretch" ToolTip.Tip="{l:T FastParam.Tip}">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <PathIcon Data="{StaticResource IconBolt}" />
-                                        <TextBlock Text="{l:T FastParam.Button}" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </Button>
-                            </Grid>
+                            <Button Classes="primary" FontSize="15" MinHeight="46" Command="{Binding FastPatchCommand}" IsEnabled="{Binding !IsFastPatching}" HorizontalAlignment="Stretch" ToolTip.Tip="{l:T FastParam.Tip}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <PathIcon Data="{StaticResource IconBolt}" />
+                                    <TextBlock Text="{l:T FastParam.Button}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Button>
                             <StackPanel Spacing="6" IsVisible="{Binding IsFastPatching}" Margin="0,2,0,0">
                                 <TextBlock Classes="xs muted" Text="{Binding FastPatchText}" />
                                 <ProgressBar Minimum="0" Maximum="100" Value="{Binding FastPatchPercent}" Height="6" />

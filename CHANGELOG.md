@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.2.6 — 2026-10-02
+## 2.2.5-korean — 2026-10-02 (fork build on top of 2.2.5; the version number stays 2.2.5 so a future upstream 2.2.6 merges cleanly)
 
 - **Korean interface (한국어).** The header language switch gains **KO** (Tiếng Việt · English · 한국어), remembered like the others; the CLI takes `--lang ko` / `FPKG_LANG=ko` and a Korean-locale system auto-detects it. The whole table — all 1 149 strings, including the CLI help, the build log lines and the new param.json editor — is translated, and the localisation tests now verify key parity, placeholder parity and format-string validity for every language.
 - **New mode tab: "Edit PKG" — a dedicated menu for editing an existing .pkg.** A fifth segment in the header mode bar (Build · Update · Extract · **Edit PKG** · Queue) opens a focused page: pick the .pkg installed on the console (headers and param.json are read from the CNT region — nothing is unpacked), see the title / Content ID / version summary, then one button — **Edit param.json & build UPDATE patch** — opens the editor and, on save, lands in build mode configured as a delta UPDATE over that package. Retail / CNT-only packages are refused with the same messages as Extract mode; the original .pkg is never modified.

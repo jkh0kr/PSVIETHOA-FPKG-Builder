@@ -1499,25 +1499,6 @@ public sealed partial class ExtractionViewModel : ObservableObject
     /// <summary>Chuyển thư mục vừa giải nén làm nguồn cho chế độ tạo gói (MainViewModel nối callback này).</summary>
     public Action<string>? UseAsBuildSourceRequested { get; set; }
 
-    /// <summary>
-    /// Yêu cầu sửa param.json của gói đang mở rồi tạo gói vá (MainViewModel nối callback này): param.json đọc thẳng từ
-    /// vùng CNT nên không cần giải nén gì trước khi mở trình sửa.
-    /// </summary>
-    public Action<PackageInfo, string>? EditPackageRequested { get; set; }
-
-    private bool CanEditRebuild => HasPackage && !IsBusy && CanExport;
-
-    [RelayCommand(CanExecute = nameof(CanEditRebuild))]
-    private void EditRebuild()
-    {
-        if (_info is not { } info)
-        {
-            return;
-        }
-
-        EditPackageRequested?.Invoke(info, Passcode);
-    }
-
     [RelayCommand(CanExecute = nameof(CanOpenOutput))]
     private void RebuildFolder()
     {

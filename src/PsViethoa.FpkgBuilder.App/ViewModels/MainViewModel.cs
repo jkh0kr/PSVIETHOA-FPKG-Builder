@@ -67,7 +67,6 @@ public sealed partial class MainViewModel : ObservableObject
         _dialogs = dialogs;
         Extraction = new ExtractionViewModel(settings, dialogs, Log);
         Extraction.UseAsBuildSourceRequested = UseExtractedFolderAsSource;
-        Extraction.EditPackageRequested = (info, passcode) => _ = EditPackageDirectAsync(info, passcode);
         Extraction.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(ExtractionViewModel.HeadlineText))
@@ -2581,51 +2580,6 @@ public sealed partial class MainViewModel : ObservableObject
         Log(LogLevel.Info, Loc.F("Extract.RebuildSwitched", folder));
     }
 
-    /// <summary>
-    /// "Sửa param.json &amp; vá" ở chế độ giải nén: mở trình sửa với param.json đọc thẳng từ vùng CNT của gói (không giải nén
-    /// gì), khi lưu chỉ xuất sce_sys của gói ra thư mục nhỏ cạnh tệp .pkg, ghi param.json đã sửa vào đó rồi chuyển sang chế
-    /// độ tạo gói BẢN VÁ với gói gốc làm tham chiếu — tệp thiếu lấy từ gói gốc nên không phải giải nén cả game.
-    /// </summary>
-    private async Task EditPackageDirectAsync(PackageInfo info, string passcode)
-    {
-        var raw = info.ParamJsonBytes is { Length: > 0 } bytes ? System.Text.Encoding.UTF8.GetString(bytes) : null;
-        var title = Loc.T("ParamEditor.Title");
-        var (saved, _, edited) = await _dialogs.EditParamJsonAsync(title, raw, null);
-        if (!saved || edited == null)
-        {
-            return;
-        }
-
-        await ApplyEditedPkgAsync(info, passcode, edited);
-        await RunEditedPatchBuildAsync(info);
-    }
-
-    /// <summary>Ghi param.json đã sửa vào sce_sys tạm cạnh .pkg rồi dựng lượt tạo BẢN VÁ (delta) trên chính gói đó.</summary>
-    private async Task ApplyEditedPkgAsync(PackageInfo info, string passcode, string editedJson)
-    {
-        var title = Loc.T("ParamEditor.Title");
-        string folder;
-        try
-        {
-            folder = Path.Combine(Path.GetDirectoryName(info.Path) ?? string.Empty, Path.GetFileNameWithoutExtension(info.Path) + "-edit");
-            Directory.CreateDirectory(Path.Combine(folder, "sce_sys"));
-            await Task.Run(() => PackageReader.ExportSceSys(info.Path, folder, passcode, CancellationToken.None));
-            await File.WriteAllTextAsync(Path.Combine(folder, "sce_sys", "param.json"), editedJson, new System.Text.UTF8Encoding(false));
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
-        {
-            await _dialogs.ShowErrorAsync(title, ex.Message);
-            return;
-        }
-
-        IsExtractMode = false;
-        Passcode = passcode;
-        PatchEnabled = true;
-        ReferencePackagePath = info.Path;
-        SetSource(folder);
-        Log(LogLevel.Info, Loc.F("Extract.EditRebuildSwitched", folder, Path.GetFileName(info.Path)));
-    }
-
     // ===================== Chế độ "Sửa gói" (sửa .pkg có sẵn) =====================
 
     private PackageInfo? _editInfo;
@@ -2652,7 +2606,6 @@ public sealed partial class MainViewModel : ObservableObject
     partial void OnHasEditPkgChanged(bool value)
     {
         ValidateEditParam();
-        EditExistingPkgCommand.NotifyCanExecuteChanged();
         FastPatchCommand.NotifyCanExecuteChanged();
     }
 
@@ -2745,14 +2698,12 @@ public sealed partial class MainViewModel : ObservableObject
             if (!cancellation.IsCancellationRequested)
             {
                 IsInspectingEditPkg = false;
-                EditExistingPkgCommand.NotifyCanExecuteChanged();
+                FastPatchCommand.NotifyCanExecuteChanged();
             }
 
             OnPropertyChanged(nameof(HasEditPkgError));
         }
     }
-
-    private bool CanEditExistingPkg => HasEditPkg && !IsBuilding && !IsInspectingEditPkg && EditParamValid;
 
     /// <summary>Kiểm tra văn bản đang sửa (chạy lại mỗi lần gõ): báo lỗi ngay trên trang, nút áp chỉ bật khi hợp lệ.</summary>
     partial void OnEditParamTextChanged(string value) => ValidateEditParam();
@@ -2772,7 +2723,7 @@ public sealed partial class MainViewModel : ObservableObject
             EditParamValid = false;
             EditParamIsError = true;
             EditParamStatus = Loc.T("Param.OverrideEmpty");
-            EditExistingPkgCommand.NotifyCanExecuteChanged();
+            FastPatchCommand.NotifyCanExecuteChanged();
             return;
         }
 
@@ -2789,7 +2740,6 @@ public sealed partial class MainViewModel : ObservableObject
             EditParamStatus = string.Join("\n", errors);
         }
 
-        EditExistingPkgCommand.NotifyCanExecuteChanged();
         FastPatchCommand.NotifyCanExecuteChanged();
     }
 
@@ -2909,57 +2859,6 @@ public sealed partial class MainViewModel : ObservableObject
                 FastPatchText = text;
             });
         };
-    }
-
-    /// <summary>Nút áp trên trang "Sửa gói": văn bản trong trình sửa lớn được ghi thẳng vào sce_sys tạm rồi dựng bản vá UPDATE.</summary>
-    [RelayCommand(CanExecute = nameof(CanEditExistingPkg))]
-    private async Task EditExistingPkgAsync()
-    {
-        if (_editInfo is not { } info)
-        {
-            return;
-        }
-
-        await ApplyEditedPkgAsync(info, Passcode, EditParamText);
-        await RunEditedPatchBuildAsync(info);
-    }
-
-    /// <summary>
-    /// Sau khi áp chỉnh sửa (tab "Sửa gói" hoặc hộp thoại ở chế độ giải nén): chờ đọc metadata của thư mục -edit và thông tin
-    /// gói gốc xong, tự nâng contentVersion khi chưa cao hơn gói gốc (nút bump vốn có) rồi HỎI có tạo gói ngay không — tạo
-    /// UPDATE là nén lại toàn bộ game một lần (PS5 không có cách sửa param.json không nén lại), nên người dùng phải biết và
-    /// chọn thay vì để tự chạy.
-    /// </summary>
-    private async Task RunEditedPatchBuildAsync(PackageInfo info)
-    {
-        for (var i = 0; i < 75; i++)
-        {
-            if (_lastMetadata is { HasParamJson: true } && !IsScanning && !IsReadingReference)
-            {
-                break;
-            }
-
-            await Task.Delay(200);
-        }
-
-        if (SuggestedPatchVersion is not null)
-        {
-            BumpVersion();
-        }
-
-        var build = await _dialogs.ConfirmAsync(
-            Loc.T("Edit.AutoBuildTitle"),
-            Loc.F("Edit.AutoBuildBody", Formatters.Size(info.FileSize)),
-            Loc.T("Edit.AutoBuildNow"),
-            Loc.T("Edit.AutoBuildLater"));
-        if (build)
-        {
-            await BuildAsync();
-        }
-        else
-        {
-            Log(LogLevel.Info, Loc.T("Edit.AutoBuildLaterLog"));
-        }
     }
 
     /// <summary>Tìm phần ghi đè param.json đã lưu cho một nguồn (khoá so không phân biệt hoa/thường như đường dẫn Windows).</summary>
