@@ -26,7 +26,14 @@ public readonly record struct ParamJsonPatchOptions(bool ForceStandardDrm, bool 
     /// <summary>Chỉ ép DRM (mặc định của thư viện trước 2.1.7).</summary>
     public static readonly ParamJsonPatchOptions DrmOnly = new(true, false, false);
 
-    public bool Any => ForceStandardDrm || ClearVersionFileUri || ClearPlayGoAttributes || LowerRequiredSystemVersion || !string.IsNullOrWhiteSpace(ContentVersion) || !string.IsNullOrWhiteSpace(TitleName);
+    /// <summary>
+    /// Phần ghi đè param.json do người dùng soạn trong trình sửa: được hợp nhất sâu vào CUỐI, đứng trên mọi sửa đổi tự động
+    /// (kể cả attributePub tính theo kích thước gói ở đường SDK). Gán JSON null cho một khoá để xoá khoá đó khỏi gói.
+    /// DRM vẫn được ép lại "standard" sau cùng khi <see cref="ForceStandardDrm"/> bật. Null / rỗng = không ghi đè gì.
+    /// </summary>
+    public JsonObject? CustomOverride { get; init; }
+
+    public bool Any => ForceStandardDrm || ClearVersionFileUri || ClearPlayGoAttributes || LowerRequiredSystemVersion || !string.IsNullOrWhiteSpace(ContentVersion) || !string.IsNullOrWhiteSpace(TitleName) || CustomOverride is { Count: > 0 };
 }
 
 /// <summary>
@@ -55,6 +62,8 @@ public sealed class ParamJsonPatch : IDisposable
     public const string Attribute3Field = "attribute3";
 
     public const string ContentVersionField = "contentVersion";
+
+    public const string ContentIdField = "contentId";
 
     public const string SdkVersionField = "sdkVersion";
 
@@ -209,8 +218,205 @@ public sealed class ParamJsonPatch : IDisposable
             }
         }
 
+        // Phần ghi đè do người dùng soạn trong trình sửa param.json: áp sau cùng, trên mọi sửa đổi tự động ở trên.
+        if (options.CustomOverride is { Count: > 0 } custom)
+        {
+            applied.AddRange(ApplyCustomOverride(node, custom, options.ForceStandardDrm));
+        }
+
         return applied;
     }
+
+    /// <summary>
+    /// Hợp nhất phần ghi đè param.json do người dùng soạn vào cây JSON đã sửa sẵn: object + object thì đi đệ quy, khoá còn lại
+    /// thay thế hoàn toàn (JSON null = xoá khoá). Khi <paramref name="forceStandardDrm"/> bật mà kết quả mang DRM khác
+    /// "standard" thì ép lại "standard" và ghi rõ trong nhật ký (gói DRM "free" hiện khoá trên PS5 và không chạy).
+    /// </summary>
+    public static IReadOnlyList<string> ApplyCustomOverride(JsonObject target, JsonObject overrideObject, bool forceStandardDrm)
+    {
+        var applied = new List<string>();
+        var paths = new List<string>();
+        MergeOverride(target, overrideObject, string.Empty, paths);
+        if (paths.Count > 0)
+        {
+            applied.Add(Loc.F("Plan.PatchOverride", DescribePaths(paths)));
+        }
+
+        if (forceStandardDrm)
+        {
+            var drm = ReadNonEmptyString(target, DrmField);
+            if (NeedsDrmRewrite(drm))
+            {
+                target[DrmField] = StandardDrm;
+                applied.Add(Loc.F("Plan.OverrideDrmForced", drm!));
+            }
+        }
+
+        return applied;
+    }
+
+    /// <summary>
+    /// Phân tích + kiểm tra phần ghi đè param.json do người dùng cung cấp (GUI / <c>fpkg-cli --param-json</c>): gốc phải là
+    /// object JSON; chỉ kiểm tra dạng của các trường quan trọng (contentId, contentVersion/masterVersion, applicationDrmType),
+    /// khoá lạ vẫn cho qua vì param.json đổi theo SDK.
+    /// </summary>
+    public static bool TryParseOverride(string rawJson, out JsonObject? overrideObject, out IReadOnlyList<string> errors)
+    {
+        overrideObject = null;
+        var issues = new List<string>();
+        errors = issues;
+
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            issues.Add(Loc.F("Param.OverrideEmpty"));
+            return false;
+        }
+
+        JsonNode? node;
+        try
+        {
+            node = JsonNode.Parse(rawJson, documentOptions: DocumentOptions);
+        }
+        catch (JsonException ex)
+        {
+            issues.Add(Loc.F("Param.OverrideInvalidJson", ex.Message));
+            return false;
+        }
+
+        if (node is not JsonObject parsed)
+        {
+            issues.Add(Loc.F("Param.OverrideNotObject"));
+            return false;
+        }
+
+        if (ReadNonEmptyString(parsed, ContentIdField) is { } contentId && !ContentIdHelper.IsValid(contentId.Trim()))
+        {
+            issues.Add(Loc.F("Param.OverrideBadContentId", contentId, ContentIdHelper.Format));
+        }
+
+        foreach (var field in MasterVersionFields)
+        {
+            if (ReadNonEmptyString(parsed, field) is { } version && !VersionHelper.TryCanonicalize(version, out _))
+            {
+                issues.Add(Loc.F("Param.OverrideBadVersion", field, version));
+            }
+        }
+
+        if (ReadNonEmptyString(parsed, DrmField) is { } drm &&
+            !string.Equals(drm.Trim(), StandardDrm, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(drm.Trim(), "free", StringComparison.OrdinalIgnoreCase))
+        {
+            issues.Add(Loc.F("Param.OverrideBadDrm", drm));
+        }
+
+        if (issues.Count > 0)
+        {
+            return false;
+        }
+
+        overrideObject = parsed;
+        return true;
+    }
+
+    private static readonly string[] MasterVersionFields = [ContentVersionField, "masterVersion"];
+
+    /// <summary>
+    /// Đọc phần ghi đè param.json từ tệp (<c>fpkg-cli --param-json</c>): lỗi đọc tệp hay lỗi kiểm tra đều trả về qua
+    /// <paramref name="errors"/> thay vì ném ra.
+    /// </summary>
+    public static bool TryLoadOverrideFile(string path, out JsonObject? overrideObject, out IReadOnlyList<string> errors)
+    {
+        overrideObject = null;
+        var issues = new List<string>();
+        errors = issues;
+
+        string raw;
+        try
+        {
+            raw = File.ReadAllText(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            issues.Add(Loc.F("Param.OverrideUnreadableFile", path, ex.Message));
+            return false;
+        }
+
+        if (!TryParseOverride(raw, out var parsed, out var parseErrors))
+        {
+            issues.AddRange(parseErrors);
+            return false;
+        }
+
+        overrideObject = parsed;
+        return true;
+    }
+
+    /// <summary>
+    /// So sánh bản param.json gốc với bản người dùng sửa trong trình sửa: trả về phần ghi đè chỉ chứa các khoá thật sự khác
+    /// (khoá bị xoá → JSON null) để lần sau hợp nhất lại bằng <see cref="ApplyCustomOverride"/>. Gốc không đọc được JSON thì
+    /// coi như rỗng — mọi chỉnh sửa đều thành phần ghi đè (sửa luôn param.json hỏng khi tạo gói). Trả về null khi không khác gì.
+    /// </summary>
+    public static JsonObject? BuildOverrideDiff(JsonObject? original, JsonObject edited)
+    {
+        var diff = new JsonObject();
+        CollectDiff(original, edited, diff);
+        return diff.Count == 0 ? null : diff;
+    }
+
+    private static void CollectDiff(JsonObject? original, JsonObject edited, JsonObject diff)
+    {
+        foreach (var (key, value) in edited)
+        {
+            JsonNode? current = null;
+            if (original != null && original.TryGetPropertyValue(key, out var existing))
+            {
+                current = existing;
+            }
+
+            if (value is JsonObject editedObject && current is JsonObject currentObject)
+            {
+                var nested = new JsonObject();
+                CollectDiff(currentObject, editedObject, nested);
+                if (nested.Count > 0)
+                {
+                    diff[key] = nested;
+                }
+            }
+            else if (!JsonNode.DeepEquals(current, value))
+            {
+                diff[key] = value?.DeepClone();
+            }
+        }
+
+        if (original != null)
+        {
+            foreach (var (key, _) in original.Where(pair => !edited.ContainsKey(pair.Key)))
+            {
+                diff[key] = null;
+            }
+        }
+    }
+
+    /// <summary>Hợp nhất sâu: cả hai là object thì đi đệ quy, ngược lại khoá của phần ghi đè thay thế hoàn toàn (JSON null = xoá khoá).</summary>
+    private static void MergeOverride(JsonObject target, JsonObject source, string prefix, List<string> paths)
+    {
+        foreach (var (key, value) in source)
+        {
+            if (value is JsonObject sourceObject && target[key] is JsonObject targetObject)
+            {
+                MergeOverride(targetObject, sourceObject, prefix + key + ".", paths);
+            }
+            else
+            {
+                target[key] = value?.DeepClone();
+                paths.Add(prefix + key);
+            }
+        }
+    }
+
+    /// <summary>Danh sách khoá đã đổi trong nhật ký: giữ ngắn gọn khi người dùng ghi đè nhiều khoá.</summary>
+    private static string DescribePaths(List<string> paths) =>
+        paths.Count <= 8 ? string.Join(", ", paths) : string.Join(", ", paths.Take(8)) + "…";
 
     /// <summary>Có thay đổi nào sẽ được áp dụng lên nội dung param.json này không (dùng để quyết định gắn hay giải nén ảnh).</summary>
     public static bool NeedsRewrite(byte[] paramJson, ParamJsonPatchOptions options)

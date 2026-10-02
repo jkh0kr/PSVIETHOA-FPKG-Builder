@@ -603,6 +603,27 @@ internal static class CommandLine
         // --version / --title ghi vào param.json của gói SDK (contentVersion, titleName) khi khác nguồn.
         request.SdkApplyPackageDetails = arguments.Get("version", "v") != null || arguments.Get("title", "t") != null;
 
+        // --param-json: object JSON ghi đè các khoá của sce_sys/param.json lúc tạo gói (nguồn không bao giờ bị ghi).
+        if (arguments.Get("param-json") is { } paramJsonPath and not "")
+        {
+            if (!ParamJsonPatch.TryLoadOverrideFile(paramJsonPath, out var paramOverride, out var paramErrors) || paramOverride == null)
+            {
+                Console.Error.WriteLine(Loc.T("Cli.InvalidArgs"));
+                foreach (var error in paramErrors)
+                {
+                    Console.Error.WriteLine($"  - {error}");
+                }
+
+                return 1;
+            }
+
+            request.ParamOverride = paramOverride;
+            if (!quiet)
+            {
+                Console.WriteLine(Loc.F("Cli.ParamOverrideLoaded", paramOverride.Count, paramJsonPath));
+            }
+        }
+
         if (arguments.Get("sdk-reference") is { } sdkReference && !string.IsNullOrWhiteSpace(sdkReference))
         {
             request.SdkReferencePackage = sdkReference;

@@ -661,7 +661,7 @@ public static partial class SonySdkProject
     {
         var node = ParseParamObject(source);
         var options = extra with { ForceStandardDrm = true };
-        var changes = ParamJsonPatch.ApplyTo(node, options);
+        var changes = new List<string>(ParamJsonPatch.ApplyTo(node, options with { CustomOverride = null }));
         if (node[ParamJsonPatch.DrmField] is not JsonValue drm || !drm.TryGetValue<string>(out var text) || text != ParamJsonPatch.StandardDrm)
         {
             // Trường thiếu hoặc không phải chuỗi: script gốc gán thẳng value["applicationDrmType"] = "standard".
@@ -671,6 +671,17 @@ public static partial class SonySdkProject
         if (selection != null)
         {
             SonySdkPackageSize.Apply(node, selection, source);
+        }
+
+        // Phần ghi đè param.json do người dùng soạn: áp CUỐI CÙNG để đứng trên cả attributePub tự động, rồi ép lại DRM
+        // "standard" như script gốc luôn yêu cầu (kể cả khi người dùng xoá hẳn trường).
+        if (options.CustomOverride is { Count: > 0 } custom)
+        {
+            changes.AddRange(ParamJsonPatch.ApplyCustomOverride(node, custom, forceStandardDrm: true));
+            if (node[ParamJsonPatch.DrmField] is not JsonValue drmAfter || !drmAfter.TryGetValue<string>(out var drmText) || drmText != ParamJsonPatch.StandardDrm)
+            {
+                node[ParamJsonPatch.DrmField] = ParamJsonPatch.StandardDrm;
+            }
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);

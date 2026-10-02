@@ -1496,9 +1496,21 @@ public sealed partial class ExtractionViewModel : ObservableObject
         }
     }
 
+    /// <summary>Chuyển thư mục vừa giải nén làm nguồn cho chế độ tạo gói (MainViewModel nối callback này).</summary>
+    public Action<string>? UseAsBuildSourceRequested { get; set; }
+
     [RelayCommand(CanExecute = nameof(CanOpenOutput))]
-    private async Task OpenOutputFolderAsync()
+    private void RebuildFolder()
     {
+        var folder = string.IsNullOrEmpty(ResultFolder) || !Directory.Exists(ResultFolder) ? OutputFolder.Trim() : ResultFolder;
+        if (Directory.Exists(folder))
+        {
+            UseAsBuildSourceRequested?.Invoke(folder);
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanOpenOutput))]
+    private async Task OpenOutputFolderAsync()    {
         var folder = string.IsNullOrEmpty(ResultFolder) || !Directory.Exists(ResultFolder) ? OutputFolder.Trim() : ResultFolder;
         if (!string.IsNullOrEmpty(folder) && !await _dialogs.OpenFolderAsync(folder))
         {

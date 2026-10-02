@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+
 namespace PsViethoa.FpkgBuilder.Core.Models;
 
 /// <summary>Toàn bộ tham số của một lần tạo gói.</summary>
@@ -134,7 +136,15 @@ public sealed class BuildRequest
             ClearPlayGoAttributes,
             LowerRequiredFirmware && SdkMajorOverride is null,
             SonySdkActive && SdkApplyPackageDetails ? Version : null,
-            SonySdkActive && SdkApplyPackageDetails ? Title : null);
+            SonySdkActive && SdkApplyPackageDetails ? Title : null)
+        { CustomOverride = ParamOverride };
+
+    /// <summary>
+    /// Phần ghi đè sce_sys/param.json do người dùng soạn trong trình sửa (đã kiểm tra bằng
+    /// <see cref="Services.ParamJsonPatch.TryParseOverride"/>): hợp nhất sâu vào bản param.json đã sửa ở cuối — trên mọi
+    /// sửa đổi tự động, DRM "standard" vẫn ép lại sau cùng. Nguồn không bao giờ bị ghi. Null = không ghi đè.
+    /// </summary>
+    public JsonObject? ParamOverride { get; set; }
 
     /// <summary>
     /// SDK Sony: ghi <see cref="Version"/> (contentVersion) và <see cref="Title"/> (titleName của ngôn ngữ mặc định) vào bản

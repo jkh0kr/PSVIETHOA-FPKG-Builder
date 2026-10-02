@@ -1,0 +1,30 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:l="using:PsViethoa.FpkgBuilder.App.Localization"
+        x:Class="PsViethoa.FpkgBuilder.App.Views.ParamJsonEditorDialog"
+        Width="760" Height="600" MinWidth="560" MinHeight="380"
+        CanResize="True" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        SystemDecorations="Full"
+        Title="param.json">
+
+    <Border Padding="24,20,24,18">
+        <Grid RowDefinitions="Auto,Auto,*,Auto">
+            <SelectableTextBlock Grid.Row="0" Classes="secondary" TextWrapping="Wrap" Text="{l:T ParamEditor.Hint}" Margin="0,0,0,12" />
+
+            <Border Grid.Row="1" Name="ErrorPanel" Background="{DynamicResource DangerSoftBrush}" CornerRadius="8" Padding="12,8" Margin="0,0,0,10" IsVisible="False">
+                <SelectableTextBlock Name="ErrorText" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}" FontSize="12.5" />
+            </Border>
+
+            <TextBox Grid.Row="2" Name="JsonBox" Classes="mono" AcceptsReturn="True" TextWrapping="NoWrap"
+                     Watermark="{}{ &quot;contentVersion&quot;: &quot;02.000.000&quot; }"
+                     VerticalContentAlignment="Top" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                     MinHeight="240" />
+
+            <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Margin="0,14,0,0">
+                <Button Name="CancelButton" MinWidth="110" Click="Cancel_Click" Content="{l:T Common.Cancel}" />
+                <Button Name="SaveButton" Classes="primary" MinWidth="110" MinHeight="36" FontSize="14" Click="Save_Click" Content="{l:T ParamEditor.Save}" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

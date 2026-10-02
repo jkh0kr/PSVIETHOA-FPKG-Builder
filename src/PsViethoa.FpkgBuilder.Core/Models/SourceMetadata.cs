@@ -57,6 +57,9 @@ public sealed class SourceMetadata
 
     public string? ParamJsonError { get; set; }
 
+    /// <summary>Nội dung textual gốc của sce_sys/param.json (cho trình sửa mở; vẫn có sẵn cả khi JSON hỏng), null khi không đọc được.</summary>
+    public string? RawParamJson { get; set; }
+
     public string? ContentId { get; set; }
 
     public string? TitleId { get; set; }

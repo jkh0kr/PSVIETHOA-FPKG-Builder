@@ -123,6 +123,9 @@ public sealed class AppSettings
 
     public List<string> RecentSources { get; set; } = new();
 
+    /// <summary>Phần ghi đè param.json (JSON text) theo từng nguồn, trình sửa lưu để các lần tạo gói sau dùng lại. Khoá = đường dẫn nguồn.</summary>
+    public Dictionary<string, string> ParamOverrides { get; set; } = new();
+
     /// <summary>Tự kiểm tra bản mới trên GitHub Releases khi khởi động (tối đa một lần mỗi 6 giờ).</summary>
     public bool CheckUpdatesOnStartup { get; set; } = true;
 

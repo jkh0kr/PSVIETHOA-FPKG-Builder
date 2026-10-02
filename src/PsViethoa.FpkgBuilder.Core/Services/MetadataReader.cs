@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using PsViethoa.FpkgBuilder.Core.ExFat;
 using PsViethoa.FpkgBuilder.Core.Localization;
@@ -88,8 +89,7 @@ public static class MetadataReader
             metadata.ParamJsonPath = imagePath + "!/" + param.Path.TrimStart('/');
             try
             {
-                using var stream = image.OpenRead(param);
-                ReadParamJson(stream, metadata);
+                ReadParamJson(image.ReadAllBytes(param, MaxParamJsonBytes), metadata);
             }
             catch (JsonException ex)
             {
@@ -152,8 +152,7 @@ public static class MetadataReader
             metadata.ParamJsonPath = imagePath + "!/" + param.Path.TrimStart('/');
             try
             {
-                using var stream = image.OpenRead(param);
-                ReadParamJson(stream, metadata);
+                ReadParamJson(image.ReadAllBytes(param, MaxParamJsonBytes), metadata);
             }
             catch (JsonException ex)
             {
@@ -228,8 +227,7 @@ public static class MetadataReader
         metadata.ParamJsonPath = paramPath;
         try
         {
-            using var stream = File.OpenRead(paramPath);
-            ReadParamJson(stream, metadata);
+            ReadParamJson(File.ReadAllBytes(paramPath), metadata);
         }
         catch (JsonException ex)
         {
@@ -243,9 +241,14 @@ public static class MetadataReader
         }
     }
 
-    private static void ReadParamJson(Stream stream, SourceMetadata metadata)
+    /// <summary>
+    /// Phân tích nội dung param.json: giữ lại bản textual gốc trong <see cref="SourceMetadata.RawParamJson"/> (UTF-8, thay ký tự
+    /// hỏng thay vì ném) cho trình sửa mở, rồi bóc các trường đã biết. Lỗi cú pháp do người gọi bắt và ghi vào ParamJsonError.
+    /// </summary>
+    private static void ReadParamJson(byte[] paramJson, SourceMetadata metadata)
     {
-        using var document = JsonDocument.Parse(stream, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
+        metadata.RawParamJson = Encoding.UTF8.GetString(paramJson);
+        using var document = JsonDocument.Parse(paramJson, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
         var root = document.RootElement;
         if (root.ValueKind != JsonValueKind.Object)
         {

@@ -394,7 +394,7 @@
                         </Grid>
                     </Border>
 
-                    <Grid ColumnDefinitions="*,10,Auto">
+                    <Grid ColumnDefinitions="*,10,Auto,10,Auto">
                         <Button Classes="primary" Command="{Binding ExtractCommand}" IsVisible="{Binding !IsExtracting}" HorizontalAlignment="Stretch" ToolTip.Tip="{l:T Extract.ButtonTip}">
                             <StackPanel Classes="btn" HorizontalAlignment="Center">
                                 <PathIcon Classes="lg" Data="{StaticResource IconPackageDown}" />
@@ -411,6 +411,12 @@
                             <StackPanel Classes="btn">
                                 <PathIcon Data="{StaticResource IconOpenExternal}" />
                                 <TextBlock Text="{l:T Extract.OpenOutput}" />
+                            </StackPanel>
+                        </Button>
+                        <Button Grid.Column="4" MinHeight="46" Command="{Binding RebuildFolderCommand}" ToolTip.Tip="{l:T Extract.RebuildTip}">
+                            <StackPanel Classes="btn">
+                                <PathIcon Data="{StaticResource IconPackage}" />
+                                <TextBlock Text="{l:T Extract.Rebuild}" />
                             </StackPanel>
                         </Button>
                     </Grid>

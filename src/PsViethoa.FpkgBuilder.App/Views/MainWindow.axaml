@@ -478,6 +478,24 @@
                                     </StackPanel>
                                 </Grid>
 
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <Button Classes="link" Command="{Binding EditParamJsonCommand}" IsVisible="{Binding HasParamJson}" HorizontalAlignment="Left">
+                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                            <PathIcon Classes="sm" Data="{StaticResource IconCodeBrackets}" />
+                                            <TextBlock Text="{l:T Step2.EditParam}" FontSize="12.5" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Border Classes="chip accent" IsVisible="{Binding HasParamOverride}">
+                                        <TextBlock Text="{l:T Step2.ParamOverrideChip}" />
+                                    </Border>
+                                    <Button Classes="link" Command="{Binding ClearParamOverrideCommand}" IsVisible="{Binding HasParamOverride}" HorizontalAlignment="Left">
+                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                            <PathIcon Classes="sm" Data="{StaticResource IconClose}" />
+                                            <TextBlock Text="{l:T Step2.ClearOverride}" FontSize="12.5" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+
                                 <Grid ColumnDefinitions="*,14,*">
                                     <StackPanel Classes="field">
                                         <TextBlock Classes="label" Text="{l:T Step2.KindLabel}" />

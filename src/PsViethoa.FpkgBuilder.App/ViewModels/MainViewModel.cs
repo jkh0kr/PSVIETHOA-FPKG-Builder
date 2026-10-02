@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json.Nodes;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -65,6 +66,7 @@ public sealed partial class MainViewModel : ObservableObject
         _settings = settings;
         _dialogs = dialogs;
         Extraction = new ExtractionViewModel(settings, dialogs, Log);
+        Extraction.UseAsBuildSourceRequested = UseExtractedFolderAsSource;
         Extraction.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(ExtractionViewModel.HeadlineText))
@@ -791,6 +793,11 @@ public sealed partial class MainViewModel : ObservableObject
 
     [ObservableProperty] private bool _hasSource;
     [ObservableProperty] private bool _hasParamJson;
+
+    /// <summary>Phần ghi đè param.json của nguồn hiện tại (đã kiểm tra), đưa vào BuildRequest khi tạo gói.</summary>
+    private JsonObject? _paramOverride;
+
+    [ObservableProperty] private bool _hasParamOverride;
     [ObservableProperty] private bool _metadataWarning;
     [ObservableProperty] private bool _isExFatSource;
 
@@ -2320,6 +2327,8 @@ public sealed partial class MainViewModel : ObservableObject
         {
             _lastMetadata = null;
             _lastStats = null;
+            _paramOverride = null;
+            HasParamOverride = false;
             ShowEmptyMetadata();
             return;
         }
@@ -2458,6 +2467,7 @@ public sealed partial class MainViewModel : ObservableObject
     private void ApplyMetadata(string source, SourceMetadata metadata)
     {
         HasSource = true;
+        LoadParamOverride(source);
         HasEboot = metadata.HasEboot;
         ApplyAmprInfo(metadata.Ampr);
         ApplyDlcEmuInfo(metadata.DlcEmu);
@@ -2538,6 +2548,119 @@ public sealed partial class MainViewModel : ObservableObject
         {
             SdkIndex = sdk - 1;
         }
+    }
+
+    // ===================== Phần ghi đè param.json (trình sửa) =====================
+
+    /// <summary>Nút "Tạo gói từ thư mục này" ở chế độ giải nén: chuyển sang chế độ tạo gói với thư mục vừa giải nén làm nguồn.</summary>
+    private void UseExtractedFolderAsSource(string folder)
+    {
+        IsExtractMode = false;
+        SetSource(folder);
+        Log(LogLevel.Info, Loc.F("Extract.RebuildSwitched", folder));
+    }
+
+    /// <summary>Tìm phần ghi đè param.json đã lưu cho một nguồn (khoá so không phân biệt hoa/thường như đường dẫn Windows).</summary>
+    private string? FindSavedParamOverride(string source)
+    {
+        foreach (var (key, value) in _settings.ParamOverrides)
+        {
+            if (string.Equals(key, source, StringComparison.OrdinalIgnoreCase))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Nạp (hoặc xoá) phần ghi đè param.json theo nguồn vừa mở; nguồn không có sce_sys/param.json thì bỏ qua phần ghi đè cũ.</summary>
+    private void LoadParamOverride(string source)
+    {
+        var saved = FindSavedParamOverride(source);
+        if (_lastMetadata is { HasParamJson: true } &&
+            saved != null &&
+            ParamJsonPatch.TryParseOverride(saved, out var parsed, out _) &&
+            parsed is { Count: > 0 })
+        {
+            _paramOverride = parsed;
+            HasParamOverride = true;
+            Log(LogLevel.Info, Loc.F("Meta.ParamOverrideLoaded", parsed.Count));
+        }
+        else
+        {
+            _paramOverride = null;
+            HasParamOverride = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task EditParamJsonAsync()
+    {
+        if (_lastMetadata is not { HasParamJson: true })
+        {
+            return;
+        }
+
+        var source = SourcePath.Trim();
+        var title = Loc.T("ParamEditor.Title");
+        var (saved, overrideJson) = await _dialogs.EditParamJsonAsync(title, _lastMetadata.RawParamJson, FindSavedParamOverride(source));
+        if (!saved)
+        {
+            return;
+        }
+
+        if (overrideJson == null)
+        {
+            // Trả về như gốc: bỏ phần ghi đè đang có.
+            ClearParamOverrideCore(source);
+            Log(LogLevel.Info, Loc.T("Meta.ParamOverrideCleared"));
+            return;
+        }
+
+        if (ParamJsonPatch.TryParseOverride(overrideJson, out var parsed, out var errors) && parsed is { Count: > 0 })
+        {
+            _paramOverride = parsed;
+            HasParamOverride = true;
+            RemoveSavedParamOverride(source);
+            _settings.ParamOverrides[source] = overrideJson;
+            SettingsService.Save(_settings);
+            Log(LogLevel.Info, Loc.F("Meta.ParamOverrideSaved", parsed.Count));
+        }
+        else
+        {
+            await _dialogs.ShowErrorAsync(title, string.Join("\n", errors));
+        }
+    }
+
+    [RelayCommand]
+    private void ClearParamOverride()
+    {
+        ClearParamOverrideCore(SourcePath.Trim());
+        Log(LogLevel.Info, Loc.T("Meta.ParamOverrideCleared"));
+    }
+
+    private void ClearParamOverrideCore(string source)
+    {
+        _paramOverride = null;
+        HasParamOverride = false;
+        RemoveSavedParamOverride(source);
+    }
+
+    private void RemoveSavedParamOverride(string source)
+    {
+        var keys = _settings.ParamOverrides.Where(pair => string.Equals(pair.Key, source, StringComparison.OrdinalIgnoreCase)).Select(pair => pair.Key).ToArray();
+        if (keys.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var key in keys)
+        {
+            _settings.ParamOverrides.Remove(key);
+        }
+
+        SettingsService.Save(_settings);
     }
 
     private void RefreshJunkSummary()
@@ -2761,6 +2884,7 @@ public sealed partial class MainViewModel : ObservableObject
         SdkMajorOverride = OverrideSdk ? SdkIndex + 1 : null,
         PublishingToolsPath = string.IsNullOrWhiteSpace(PublishingToolsPath) ? null : PublishingToolsPath.Trim(),
         PreventSleep = PreventSleep,
+        ParamOverride = _paramOverride,
     };
 
     private IReadOnlyList<ValidationError> RefreshValidation()
