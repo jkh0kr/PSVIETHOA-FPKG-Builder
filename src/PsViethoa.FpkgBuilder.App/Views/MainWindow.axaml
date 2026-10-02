@@ -1218,19 +1218,24 @@
                             <StackPanel Grid.Row="2" Spacing="10">
                                 <TextBlock Name="EditParamCaret" Classes="xs muted" TextWrapping="NoWrap" Text="" />
                                 <TextBlock Text="{Binding EditParamStatus}" TextWrapping="Wrap" FontSize="12.5" Classes.error="{Binding EditParamIsError}" />
-                            <Button Classes="primary" FontSize="15" MinHeight="46" Command="{Binding FastPatchCommand}" IsEnabled="{Binding !IsFastPatching}" HorizontalAlignment="Stretch" ToolTip.Tip="{l:T FastParam.Tip}">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <PathIcon Data="{StaticResource IconBolt}" />
-                                    <TextBlock Text="{l:T FastParam.Button}" TextWrapping="Wrap" />
+                            <Grid ColumnDefinitions="*,10,Auto" Margin="0,2,0,0">
+                                <Button Classes="primary" Command="{Binding FastPatchCommand}" IsVisible="{Binding !IsFastPatching}" HorizontalAlignment="Stretch" MinHeight="46" ToolTip.Tip="{l:T FastParam.Tip}">
+                                    <StackPanel Classes="btn" HorizontalAlignment="Center">
+                                        <PathIcon Classes="lg" Data="{StaticResource IconBolt}" />
+                                        <TextBlock Text="{l:T FastParam.Button}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Classes="danger" MinHeight="46" Command="{Binding CancelFastPatchCommand}" IsVisible="{Binding IsFastPatching}" HorizontalAlignment="Stretch" ToolTip.Tip="Esc">
+                                    <StackPanel Classes="btn" HorizontalAlignment="Center">
+                                        <PathIcon Classes="lg" Data="{StaticResource IconStop}" />
+                                        <TextBlock Text="{l:T Common.Cancel}" />
+                                    </StackPanel>
+                                </Button>
+                                <StackPanel Grid.Column="2" Spacing="6" IsVisible="{Binding IsFastPatching}" VerticalAlignment="Center" MinWidth="230" Margin="0,0,0,0">
+                                    <TextBlock Classes="xs muted" Text="{Binding FastPatchText}" TextWrapping="NoWrap" />
+                                    <ProgressBar Minimum="0" Maximum="100" Value="{Binding FastPatchPercent}" Height="6" />
                                 </StackPanel>
-                            </Button>
-                            <StackPanel Spacing="6" IsVisible="{Binding IsFastPatching}" Margin="0,2,0,0">
-                                <Grid ColumnDefinitions="*,10,Auto">
-                                    <ProgressBar Minimum="0" Maximum="100" Value="{Binding FastPatchPercent}" Height="6" VerticalAlignment="Center" />
-                                    <Button Grid.Column="2" MinHeight="30" MinWidth="96" Command="{Binding CancelFastPatchCommand}" Content="{l:T Common.Cancel}" />
-                                </Grid>
-                                <TextBlock Classes="xs muted" Text="{Binding FastPatchText}" />
-                            </StackPanel>
+                            </Grid>
                                 <SelectableTextBlock Classes="hint" TextWrapping="Wrap" Text="{l:T Edit.Hint}" />
                             </StackPanel>
                         </Grid>
