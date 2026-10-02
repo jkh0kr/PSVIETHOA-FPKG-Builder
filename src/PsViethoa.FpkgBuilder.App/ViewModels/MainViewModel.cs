@@ -2653,6 +2653,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         ValidateEditParam();
         EditExistingPkgCommand.NotifyCanExecuteChanged();
+        FastPatchCommand.NotifyCanExecuteChanged();
     }
 
     [RelayCommand]
@@ -2789,7 +2790,76 @@ public sealed partial class MainViewModel : ObservableObject
         }
 
         EditExistingPkgCommand.NotifyCanExecuteChanged();
+        FastPatchCommand.NotifyCanExecuteChanged();
     }
+
+    private bool CanFastPatch => HasEditPkg && EditParamValid && !IsFastPatching && !IsBuilding && !IsInspectingEditPkg;
+
+    /// <summary>
+    /// Đường vá NHANH (thử nghiệm): sao chép gói sang tệp mới rồi thay param.json ngay trong khe CNT của nó — không nén lại
+    /// gì, chỉ niêm phong lại vài khối 64 KiB. Gói gốc không bao giờ bị đụng. Kết quả chưa kiểm trên máy thật.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanFastPatch))]
+    private async Task FastPatchAsync()
+    {
+        if (_editInfo is not { } info)
+        {
+            return;
+        }
+
+        var folder = Path.GetDirectoryName(info.Path) ?? string.Empty;
+        var suggested = Path.Combine(folder, Path.GetFileNameWithoutExtension(info.Path) + "-reparam.pkg");
+        var target = await _dialogs.SaveFileAsync(Loc.T("FastParam.SaveTitle"), Path.GetFileName(suggested), ".pkg", new FilePickerFileType(Loc.T("Extract.PkgFilter")) { Patterns = ["*.pkg"] });
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            return;
+        }
+
+        IsFastPatching = true;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            Log(LogLevel.Info, Loc.F("FastParam.Running", Formatters.Size(info.FileSize)));
+            var source = info.Path;
+            var passcode = Passcode;
+            var bytes = System.Text.Encoding.UTF8.GetBytes(EditParamText);
+            var report = await Task.Run(() => CntParamPatcher.Patch(source, target, bytes, (percent, _) => { }, CancellationToken.None));
+
+            // Đọc lại bản sao để báo đúng những gì ghi được.
+            var after = await Task.Run(() => PackageInspector.Inspect(target, passcode, CancellationToken.None));
+            if (after.ParamJsonError == null && after.Params != null)
+            {
+                Log(LogLevel.Success, Loc.F("FastParam.Done", Formatters.Duration(stopwatch.Elapsed), target, Formatters.Count((int)report.SlotSize), Formatters.Count(report.PaddedBytes), report.ResealedBlocks));
+                Log(LogLevel.Info, Loc.F("FastParam.VerifyNote", after.Params.Title ?? "—", after.Params.ContentVersion ?? "—"));
+            }
+            else
+            {
+                Log(LogLevel.Warning, Loc.F("FastParam.VerifyNote", after.ParamJsonError ?? "—", "—"));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            try
+            {
+                if (File.Exists(target))
+                {
+                    File.Delete(target);
+                }
+            }
+            catch (Exception)
+            {
+            }
+
+            await _dialogs.ShowErrorAsync(Loc.T("FastParam.FailedTitle"), ex.Message);
+        }
+        finally
+        {
+            IsFastPatching = false;
+            FastPatchCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    [ObservableProperty] private bool _isFastPatching;
 
     /// <summary>Nút áp trên trang "Sửa gói": văn bản trong trình sửa lớn được ghi thẳng vào sce_sys tạm rồi dựng bản vá UPDATE.</summary>
     [RelayCommand(CanExecute = nameof(CanEditExistingPkg))]

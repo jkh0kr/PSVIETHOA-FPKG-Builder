@@ -1224,6 +1224,12 @@
                                         <TextBlock Text="{l:T Edit.Apply}" />
                                     </StackPanel>
                                 </Button>
+                                <Button MinHeight="42" Command="{Binding FastPatchCommand}" IsEnabled="{Binding !IsFastPatching}" ToolTip.Tip="{l:T FastParam.Tip}">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <PathIcon Data="{StaticResource IconBolt}" />
+                                        <TextBlock Text="{l:T FastParam.Button}" />
+                                    </StackPanel>
+                                </Button>
                                 <SelectableTextBlock Classes="hint" TextWrapping="Wrap" Text="{l:T Edit.Hint}" />
                             </StackPanel>
                         </Grid>
