@@ -2874,53 +2874,62 @@ public sealed partial class MainViewModel : ObservableObject
 
         return (percent, phase) =>
         {
-            var now = stopwatch.Elapsed;
-
-            // Đo tốc độ theo byte (chỉ giai đoạn sao chép, 0..60%).
-            long copied = 0;
-            if (phase == "copying")
+            try
             {
-                copied = (long)(totalBytes * Math.Clamp(percent, 0, 60) / 60.0);
-                var sampleDt = (now - lastSampleAt).TotalSeconds;
-                if (sampleDt >= 0.3)
+                var now = stopwatch.Elapsed;
+
+                // Đo tốc độ theo byte (chỉ giai đoạn sao chép, 0..60%).
+                long copied = 0;
+                if (phase == "copying")
                 {
-                    var instant = (copied - lastSampleBytes) / sampleDt;
-                    bytesPerSecond = bytesPerSecond <= 0 ? instant : bytesPerSecond * 0.7 + instant * 0.3;
-                    lastSampleBytes = copied;
-                    lastSampleAt = now;
+                    copied = (long)(totalBytes * Math.Clamp(percent, 0, 60) / 60.0);
+                    var sampleDt = (now - lastSampleAt).TotalSeconds;
+                    if (sampleDt >= 0.3)
+                    {
+                        var instant = (copied - lastSampleBytes) / sampleDt;
+                        bytesPerSecond = bytesPerSecond <= 0 ? instant : bytesPerSecond * 0.7 + instant * 0.3;
+                        lastSampleBytes = copied;
+                        lastSampleAt = now;
+                    }
                 }
-            }
 
-            if ((now - lastUiAt).TotalMilliseconds < 200 && percent < 100)
-            {
-                return;
-            }
-
-            lastUiAt = now;
-            var whole = (int)Math.Clamp(Math.Round(percent), 0, 100);
-            string text;
-            if (phase == "copying" && bytesPerSecond > 1 && whole < 60)
-            {
-                var remaining = TimeSpan.FromSeconds(Math.Max(0, totalBytes - copied) / bytesPerSecond);
-                text = Loc.F("FastParam.PhaseCopy", whole) + Loc.F("FastParam.SpeedEta", Formatters.Size((long)bytesPerSecond) + "/s", Formatters.Duration(remaining));
-            }
-            else
-            {
-                text = phase switch
+                if ((now - lastUiAt).TotalMilliseconds < 200 && percent < 100)
                 {
-                    "copying" => Loc.F("FastParam.PhaseCopy", whole),
-                    "re-sealing CNT" => Loc.F("FastParam.PhaseSeal", whole),
-                    "rebuilding SI PlayGo CRCs" => Loc.F("FastParam.PhaseCrc", whole),
-                    "done" => Loc.T("FastParam.PhaseDone"),
-                    _ => $"{whole:0}%",
-                };
-            }
+                    return;
+                }
 
-            Dispatcher.UIThread.Post(() =>
+                lastUiAt = now;
+                var whole = (int)Math.Clamp(Math.Round(percent), 0, 100);
+                string text;
+                if (phase == "copying" && bytesPerSecond > 1024 && whole < 60)
+                {
+                    // Kẹp ETA vào một ngày: tốc độ đo được quá thấp lúc đầu dễ làm TimeSpan tràn (lỗi "duration is too long").
+                    var etaSeconds = Math.Clamp((totalBytes - copied) / bytesPerSecond, 0, 86400);
+                    var remaining = TimeSpan.FromSeconds(etaSeconds);
+                    text = Loc.F("FastParam.PhaseCopy", whole) + Loc.F("FastParam.SpeedEta", Formatters.Size((long)bytesPerSecond) + "/s", Formatters.Duration(remaining));
+                }
+                else
+                {
+                    text = phase switch
+                    {
+                        "copying" => Loc.F("FastParam.PhaseCopy", whole),
+                        "re-sealing CNT" => Loc.F("FastParam.PhaseSeal", whole),
+                        "rebuilding SI PlayGo CRCs" => Loc.F("FastParam.PhaseCrc", whole),
+                        "done" => Loc.T("FastParam.PhaseDone"),
+                        _ => $"{whole:0}%",
+                    };
+                }
+
+                Dispatcher.UIThread.Post(() =>
+                {
+                    FastPatchPercent = whole;
+                    FastPatchText = text;
+                });
+            }
+            catch (Exception)
             {
-                FastPatchPercent = whole;
-                FastPatchText = text;
-            });
+                // Tiến độ chỉ để hiển thị — lỗi định dạng không được làm hỏng lượt vá đang chạy.
+            }
         };
     }
 
