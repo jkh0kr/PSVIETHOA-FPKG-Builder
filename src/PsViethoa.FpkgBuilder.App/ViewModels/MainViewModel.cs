@@ -2822,7 +2822,22 @@ public sealed partial class MainViewModel : ObservableObject
             Log(LogLevel.Info, Loc.F("FastParam.Running", Formatters.Size(info.FileSize)));
             var source = info.Path;
             var passcode = Passcode;
-            var bytes = System.Text.Encoding.UTF8.GetBytes(EditParamText);
+
+            // Trình sửa hiển thị bản THỤT ĐẦU DÒNG cho dễ đọc — khe CNT chỉ rộng bằng param.json gốc, gửi nguyên bản
+            // indented sẽ tràn khe. Đóng gói lại COMPACT (giữ nguyên mọi giá trị đã sửa) trước khi vá.
+            var payload = EditParamText;
+            try
+            {
+                if (System.Text.Json.Nodes.JsonNode.Parse(payload, documentOptions: EditJsonDocumentOptions) is System.Text.Json.Nodes.JsonObject compact)
+                {
+                    payload = compact.ToJsonString();
+                }
+            }
+            catch (System.Text.Json.JsonException)
+            {
+            }
+
+            var bytes = System.Text.Encoding.UTF8.GetBytes(payload);
             var report = await Task.Run(() => CntParamPatcher.Patch(source, target, bytes, (percent, _) => { }, CancellationToken.None));
 
             // Đọc lại bản sao để báo đúng những gì ghi được.

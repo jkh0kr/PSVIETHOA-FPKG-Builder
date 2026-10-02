@@ -36,7 +36,12 @@ public sealed class FastParamPatchTests
             const string newTitle = "Sackboy FASTPATCH OK";
             var node = JsonNode.Parse(File.ReadAllText(rawParam))!.AsObject();
             node["localizedParameters"]!["en-US"]!["titleName"] = newTitle;
-            var compact = node.ToJsonString(new System.Text.Json.JsonSerializerOptions());
+
+            // GUI 경로 그대로: 에디터는 들여쓰기 본문을 보여주고, 전송 전 컴팩트로 다시 직렬화한다.
+            var pretty = node.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            var reparsed = JsonNode.Parse(pretty)!.AsObject();
+            var compact = reparsed.ToJsonString(new System.Text.Json.JsonSerializerOptions());
+            Assert.True(pretty.Length > compact.Length, "indented text must be larger than compact");
 
             var report = CntParamPatcher.PatchInPlace(copy, Encoding.UTF8.GetBytes(compact));
             Assert.True(report.SlotSize > 0);

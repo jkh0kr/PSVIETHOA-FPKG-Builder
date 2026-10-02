@@ -187,8 +187,10 @@ public static class CntParamPatcher
         stream.Flush();
         progress?.Invoke(85, "rebuilding SI PlayGo CRCs");
 
-        // (6) CRC32C PlayGo trong kho SI cho các khối vừa chạm.
-        var cntEnd = Math.Max(0x5A0L, Math.Max(rollupOffset + rollupSize, bodyOffset + bodySize));
+        // (6) CRC32C PlayGo trong kho SI cho các khối vừa chạm — tính điểm bắt đầu SI đúng như SonySdkConverter.
+        var table = BinaryPrimitives.ReadUInt32BigEndian(cnt.AsSpan(0x18));
+        var count = (int)BinaryPrimitives.ReadUInt32BigEndian(cnt.AsSpan(0x10));
+        var cntEnd = Math.Max(0x5A0L, Math.Max(table + (long)count * EntryMetaSize, bodyOffset + bodySize));
         foreach (var e in entries)
         {
             cntEnd = Math.Max(cntEnd, (long)e.Offset + e.Size);
