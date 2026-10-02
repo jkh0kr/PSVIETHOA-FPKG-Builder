@@ -2597,6 +2597,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
 
         await ApplyEditedPkgAsync(info, passcode, edited);
+        await RunEditedPatchBuildAsync();
     }
 
     /// <summary>Ghi param.json đã sửa vào sce_sys tạm cạnh .pkg rồi dựng lượt tạo BẢN VÁ (delta) trên chính gói đó.</summary>
@@ -2799,8 +2800,33 @@ public sealed partial class MainViewModel : ObservableObject
             return;
         }
 
-        // Sửa xong thì chuyển sang chế độ tạo gói (bản vá) — ở lại tab này chỉ khi người dùng bỏ hộp thoại.
         await ApplyEditedPkgAsync(info, Passcode, EditParamText);
+        await RunEditedPatchBuildAsync();
+    }
+
+    /// <summary>
+    /// Sau khi áp chỉnh sửa (tab "Sửa gói" hoặc hộp thoại ở chế độ giải nén): chờ đọc metadata của thư mục -edit và thông tin
+    /// gói gốc xong, tự nâng contentVersion khi chưa cao hơn gói gốc (nút bump vốn có) rồi gọi Tạo gói luôn — nút hứa
+    /// "Lưu &amp; tạo bản vá" nên người dùng không phải bấm thêm lần nữa.
+    /// </summary>
+    private async Task RunEditedPatchBuildAsync()
+    {
+        for (var i = 0; i < 75; i++)
+        {
+            if (_lastMetadata is { HasParamJson: true } && !IsScanning && !IsReadingReference)
+            {
+                break;
+            }
+
+            await Task.Delay(200);
+        }
+
+        if (SuggestedPatchVersion is not null)
+        {
+            BumpVersion();
+        }
+
+        await BuildAsync();
     }
 
     /// <summary>Tìm phần ghi đè param.json đã lưu cho một nguồn (khoá so không phân biệt hoa/thường như đường dẫn Windows).</summary>
