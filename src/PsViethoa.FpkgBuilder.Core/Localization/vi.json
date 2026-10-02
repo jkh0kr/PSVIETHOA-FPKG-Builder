@@ -1172,6 +1172,8 @@
   "Patch.Done": "Bản vá đã xong: {0} ({1}) là bản cập nhật cài đè lên gói gốc; {2} ({3}) là gói đầy đủ đi kèm để kiểm tra/giải nén.",
   "Patch.Verifying": "Đang kiểm tra cấu trúc gói .remastered.pkg đi kèm (gói delta không có header FIH riêng)…",
   "Patch.InstallNote": "Thứ tự cài trên PS5: gói gốc trước, rồi tới bản vá này. Bản vá chỉ dùng được trên đúng gói gốc đó.",
+  "Patch.AuditClean": "Kiểm tra delta: cả {0} khối PFS ngoài của gói mới đều giống hệt gói gốc — bản vá chỉ mang metadata gói (param.json), không mang tệp game nào.",
+  "Patch.AuditDiff": "Kiểm tra delta: {0}/{1} khối PFS ngoài khác gói gốc — bản vá đang mang dữ liệu game (nén lại không khớp công cụ gốc). Tạo lại gói gốc bằng công cụ này để tránh.",
   "Patch.SdkRequired": "Bản vá chỉ tạo được bằng SDK Sony ({0}). Hãy sửa SDK Sony hoặc bỏ gói gốc để tạo gói đầy đủ.",
   "Patch.Title": "Bản vá cập nhật (tuỳ chọn)",
   "Patch.Toggle": "Tạo gói UPDATE (bản vá) cho gói gốc đã cài",

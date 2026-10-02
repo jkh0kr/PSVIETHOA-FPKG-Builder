@@ -646,6 +646,19 @@ public sealed class BuildEngine
             var verification = await Task.Run(() => PackageVerifier.Verify(result.RemasteredPath, request.ImageMode, false, cancellationToken, null), cancellationToken).ConfigureAwait(false);
             LogSdkVersionChange(appFolder, result.RemasteredPath, request.Passcode, log);
 
+            // Kiểm tra độ tinh khiết của bản vá: imagedigs của gói remastered phải GIỐNG HỆT gói gốc khi chỉ sửa param.json
+            // (param.json nằm trong CNT, không thuộc PFS ngoài) — khối nào khác là bản vá đang mang dữ liệu game.
+            if (request.SdkReferencePackage is { } auditBase && File.Exists(auditBase))
+            {
+                var audit = await Task.Run(() => PatchDeltaAudit.Compare(auditBase, result.RemasteredPath!), cancellationToken).ConfigureAwait(false);
+                if (audit is { } result2)
+                {
+                    log(result2.Clean
+                        ? new LogEntry(LogLevel.Success, Loc.F("Patch.AuditClean", result2.TotalBlocks))
+                        : new LogEntry(LogLevel.Warning, Loc.F("Patch.AuditDiff", result2.DifferentBlocks, result2.TotalBlocks)));
+                }
+            }
+
             // Người dùng chọn tệp xuất ra: Publishing Tools luôn ghi cả hai, tệp không cần bị xoá SAU khi đã kiểm tra cấu trúc. Hai tệp chuyển
             // đổi qua lại được bằng img_convert (remastered ⇄ patch + gói base), nên không mất gì.
             var keptPath = result.OutputPath;

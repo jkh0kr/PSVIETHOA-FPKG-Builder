@@ -1172,6 +1172,8 @@
   "Patch.Done": "Patch ready: {0} ({1}) is the update to install over the base package; {2} ({3}) is the full companion package for checking/extracting.",
   "Patch.Verifying": "Checking the structure of the companion .remastered.pkg (a delta patch has no FIH header of its own)…",
   "Patch.InstallNote": "Install order on the PS5: the base package first, then this patch. The patch only works over exactly that base package.",
+  "Patch.AuditClean": "Delta audit: all {0} outer-PFS blocks of the new package are byte-identical to the base — the update carries only the package metadata (param.json), no game files.",
+  "Patch.AuditDiff": "Delta audit: {0} of {1} outer-PFS blocks differ from the base — the update carries game-data blocks (recompression mismatch with the original tool). Rebuilding the base with this tool avoids it.",
   "Patch.SdkRequired": "A patch can only be built with the Sony SDK ({0}). Fix the Sony SDK or remove the base package to build a full package.",
   "Patch.Title": "Update patch (optional)",
   "Patch.Toggle": "Build an UPDATE package (patch) for an installed base package",

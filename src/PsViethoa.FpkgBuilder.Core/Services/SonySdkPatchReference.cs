@@ -102,7 +102,8 @@ public static class SonySdkPatchReference
 
     /// <summary>So "01.002.000" theo từng nhóm số; nhóm thiếu coi là 0, phần không phải số so theo chữ.</summary>
     /// <summary>
-    /// Phiên bản kế tiếp để gợi ý cho bản vá: tăng nhóm giữa của NN.NNN.NNN (01.000.000 → 01.001.000; 01.999.xxx → 02.000.000).
+    /// Phiên bản kế tiếp để gợi ý cho bản vá: tăng NHÓM CUỐI của NN.NNN.NNN (01.024.000 → 01.024.001 — kiểu hotfix,
+    /// giữ nguyên nhóm giữa); nhóm cuối 999 thì sang nhóm giữa (01.024.999 → 01.025.000), nhóm giữa 999 thì sang nhóm đầu.
     /// Null khi <paramref name="version"/> không đọc được.
     /// </summary>
     public static string? NextVersion(string? version)
@@ -113,18 +114,22 @@ public static class SonySdkPatchReference
         }
 
         var parts = canonical.Split('.');
-        if (parts.Length != 3 || !int.TryParse(parts[0], out var major) || !int.TryParse(parts[1], out var minor))
+        if (parts.Length != 3 || !int.TryParse(parts[0], out var major) || !int.TryParse(parts[1], out var minor) || !int.TryParse(parts[2], out var patch))
         {
             return null;
         }
 
-        if (++minor > 999)
+        if (++patch > 999)
         {
-            minor = 0;
-            major++;
+            patch = 0;
+            if (++minor > 999)
+            {
+                minor = 0;
+                major++;
+            }
         }
 
-        return major > 99 ? null : $"{major:00}.{minor:000}.000";
+        return major > 99 ? null : $"{major:00}.{minor:000}.{patch:000}";
     }
 
     /// <summary>Gói đầy đủ đi kèm của một bản vá UPDATE_&lt;tên&gt;.pkg: &lt;tên&gt;.remastered.pkg cùng thư mục.</summary>
