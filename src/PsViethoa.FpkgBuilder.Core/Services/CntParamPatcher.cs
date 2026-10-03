@@ -224,7 +224,7 @@ public static class CntParamPatcher
         var degree = ChooseCopyDegree(source);
         if (degree > 1 && total >= (64L << 20))
         {
-            ParallelCopy(source, target, total, degree, progress, cancellationToken);
+            PipelineCopy(source, target, total, degree, progress, cancellationToken);
             return;
         }
 
@@ -248,71 +248,171 @@ public static class CntParamPatcher
         }
     }
 
-    private static void ParallelCopy(string source, string target, long total, int degree, Action<double, string>? progress, CancellationToken cancellationToken)
+    /// <summary>
+    /// Sao chép đường ống: ĐỌC song song (đầu đĩa SSD chịu QD cao) nhưng GHI một luồng duy nhất THEO ĐÚNG THỨ TỰ chunk.
+    /// Ghi tuần tự giữ Valid-Data-Length đi lên liên tục — không phát sinh CcZeroData lấp khoảng trống gigabyte giữa bốn
+    /// vùng rải rác như bản ghi song song cũ (thứ từng làm tiến độ "đứng hình" lúc bộ nhớ đệm bẩn đầy), và flush đĩa mỗi
+    /// 1 GiB giữ nợ bộ nhớ đệm luôn thấp nên thanh tiến độ chạy mịn từ đầu tới cuối.
+    /// </summary>
+    private static void PipelineCopy(string source, string target, long total, int degree, Action<double, string>? progress, CancellationToken cancellationToken)
     {
-        // Cấp phát trước độ dài tệp để các luồng ghi vị trí bất kỳ không phải mở rộng tệp dần.
-        using (var init = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, FileOptions.SequentialScan))
+        const int chunkSize = 1 << 23; // 8 MiB
+        var chunkCount = (total + chunkSize - 1) / chunkSize;
+        var ringSize = Math.Max(4, degree * 2);
+        var ring = new byte[ringSize][];
+        for (var i = 0; i < ringSize; i++)
         {
-            init.SetLength(total);
+            ring[i] = new byte[chunkSize];
         }
 
-        var segment = ((total + degree - 1) / degree + (1 << 20) - 1) & ~((1 << 20) - 1L);
-        long done = 0;
+        // 0 = rảnh (đọc được), 1 = đang đọc, 2 = sẵn sàng ghi, 3 = đang ghi.
+        var state = new int[ringSize];
+        var gate = new object();
+        long nextRead = 0;
+        long nextWrite = 0;
         Exception? failure = null;
-        var workers = new Thread[degree];
+
+        var readers = new Thread[degree];
         for (var index = 0; index < degree; index++)
         {
-            var start = (long)index * segment;
-            if (start >= total)
-            {
-                break;
-            }
-
-            var end = Math.Min(total, start + segment);
-            workers[index] = new Thread(() =>
+            readers[index] = new Thread(() =>
             {
                 try
                 {
                     using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 22, FileOptions.SequentialScan);
-                    using var output = new FileStream(target, FileMode.Open, FileAccess.Write, FileShare.Write, 1 << 22, FileOptions.SequentialScan);
-                    var buffer = new byte[1 << 22];
-                    long position = start;
-                    while (position < end)
+                    while (true)
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        var size = (int)Math.Min(buffer.Length, end - position);
-                        input.Position = position;
-                        input.ReadExactly(buffer, 0, size);
-                        output.Position = position;
-                        output.Write(buffer, 0, size);
-                        position += size;
-                        var copied = System.Threading.Interlocked.Add(ref done, size);
-                        progress?.Invoke(60.0 * copied / total, "copying");
+                        var slot = 0;
+                        lock (gate)
+                        {
+                            while (failure == null && (nextRead >= chunkCount || !TryClaimFreeSlot(state, out slot)))
+                            {
+                                if (cancellationToken.IsCancellationRequested)
+                                {
+                                    return;
+                                }
+
+                                Monitor.Wait(gate, 200);
+                            }
+
+                            if (failure != null || nextRead >= chunkCount)
+                            {
+                                return;
+                            }
+
+                            nextRead++;
+                            state[slot] = 1;
+                        }
+
+                        var chunk = nextRead - 1;
+                        var offset = chunk * chunkSize;
+                        var size = (int)Math.Min(chunkSize, total - offset);
+                        input.Position = offset;
+                        input.ReadExactly(ring[slot], 0, size);
+
+                        lock (gate)
+                        {
+                            state[slot] = 2;
+                            Monitor.PulseAll(gate);
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
-                    lock (workers)
+                    lock (gate)
                     {
                         failure ??= ex;
+                        Monitor.PulseAll(gate);
                     }
                 }
             })
             {
                 IsBackground = true,
             };
-            workers[index].Start();
+            readers[index].Start();
         }
 
-        foreach (var worker in workers)
+        long done = 0;
+        try
         {
-            worker?.Join();
+            using var output = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 23, FileOptions.SequentialScan);
+            var sinceFlush = 0L;
+            while (nextWrite < chunkCount)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var slot = (int)(nextWrite % ringSize);
+                lock (gate)
+                {
+                    while (state[slot] != 2)
+                    {
+                        if (failure != null)
+                        {
+                            throw failure;
+                        }
+
+                        if (cancellationToken.IsCancellationRequested)
+                        {
+                            throw new OperationCanceledException(cancellationToken);
+                        }
+
+                        Monitor.Wait(gate, 200);
+                    }
+
+                    state[slot] = 3;
+                }
+
+                var offset = nextWrite * chunkSize;
+                var size = (int)Math.Min(chunkSize, total - offset);
+                output.Write(ring[slot], 0, size);
+                nextWrite++;
+                done += size;
+                sinceFlush += size;
+                if (sinceFlush >= (1L << 30))
+                {
+                    // Giữ nợ bộ nhớ đệm ghi thấp: flush xuống đĩa từng 1 GiB thay vì để dồn 20+ GiB rồi đứng hình một cục.
+                    output.Flush(flushToDisk: true);
+                    sinceFlush = 0;
+                }
+
+                progress?.Invoke(60.0 * done / total, "copying");
+
+                lock (gate)
+                {
+                    state[slot] = 0;
+                    Monitor.PulseAll(gate);
+                }
+            }
+
+            output.Flush(flushToDisk: true);
+        }
+        finally
+        {
+            lock (gate)
+            {
+                failure ??= new OperationCanceledException(cancellationToken);
+                Monitor.PulseAll(gate);
+            }
+
+            foreach (var reader in readers)
+            {
+                reader?.Join(5000);
+            }
+        }
+    }
+
+    private static bool TryClaimFreeSlot(int[] state, out int slot)
+    {
+        for (var i = 0; i < state.Length; i++)
+        {
+            if (state[i] == 0)
+            {
+                slot = i;
+                return true;
+            }
         }
 
-        if (failure != null)
-        {
-            throw failure;
-        }
+        slot = -1;
+        return false;
     }
 
     /// <summary>SSD (không seek penalty) → 4 luồng; USB/đĩa quang → tuần tự; mạng → 2; không dò được → 4.</summary>
