@@ -224,7 +224,7 @@ public static class CntParamPatcher
         var degree = ChooseCopyDegree(source);
         if (degree > 1 && total >= (64L << 20))
         {
-            PipelineCopy(source, target, total, degree, progress, cancellationToken);
+            FastCopy(source, target, total, degree, progress, cancellationToken);
             return;
         }
 
@@ -247,6 +247,98 @@ public static class CntParamPatcher
             progress?.Invoke(60.0 * done / Math.Max(1, total), "copying");
         }
     }
+
+    /// <summary>
+    /// Đường sao chép nhanh nhất có thể: thử <c>SetFileValidData</c> (cần đặc quyền SeManageVolumePrivilege — có khi chạy quản
+    /// trị) — sau đó bốn vùng ghi RẢI RÁC song song KHÔNG phát sinh CcZeroData lấp số 0 (đây chính là thứ từng làm bản ghi
+    /// song song cũ chậm và "đứng hình"). Không có đặc quyền thì rơi về đường ống tuần tự an toàn.
+    /// </summary>
+    private static void FastCopy(string source, string target, long total, int degree, Action<double, string>? progress, CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            PipelineCopy(source, target, total, degree, progress, cancellationToken);
+            return;
+        }
+
+        // Đặt ValidData trong scope riêng — handle PHẢI đóng trước khi đường ống ghi tuần tự mở lại tệp (mở khi còn
+        // handle cũ chính là lỗi "being used by another process" tôi vừa tự gây ra).
+        var validData = false;
+        using (var init = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, FileOptions.SequentialScan))
+        {
+            init.SetLength(total);
+            validData = SetFileValidData(init.SafeFileHandle, total);
+        }
+
+        if (!validData)
+        {
+            // Không có đặc quyền (hay FS không hỗ trợ): đường ống ghi tuần tự — VDL vẫn đi liên tục.
+            PipelineCopy(source, target, total, degree, progress, cancellationToken);
+            return;
+        }
+
+        var segment = ((total + degree - 1) / degree + (1 << 20) - 1) & ~((1 << 20) - 1L);
+        long done = 0;
+        Exception? failure = null;
+        var workers = new Thread[degree];
+        for (var index = 0; index < degree; index++)
+        {
+            var start = (long)index * segment;
+            if (start >= total)
+            {
+                break;
+            }
+
+            var end = Math.Min(total, start + segment);
+            workers[index] = new Thread(() =>
+            {
+                try
+                {
+                    using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 23, FileOptions.SequentialScan);
+                    using var output = new FileStream(target, FileMode.Open, FileAccess.Write, FileShare.Write, 1 << 23, FileOptions.SequentialScan);
+                    var buffer = new byte[1 << 23];
+                    long position = start;
+                    while (position < end)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var size = (int)Math.Min(buffer.Length, end - position);
+                        input.Position = position;
+                        input.ReadExactly(buffer, 0, size);
+                        output.Position = position;
+                        output.Write(buffer, 0, size);
+                        position += size;
+                        var copied = System.Threading.Interlocked.Add(ref done, size);
+                        progress?.Invoke(60.0 * copied / total, "copying");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lock (workers)
+                    {
+                        failure ??= ex;
+                    }
+                }
+            })
+            {
+                IsBackground = true,
+            };
+            workers[index].Start();
+        }
+
+        foreach (var worker in workers)
+        {
+            worker?.Join();
+        }
+
+        if (failure != null)
+        {
+            throw failure;
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SetFileValidData(Microsoft.Win32.SafeHandles.SafeFileHandle hFile, long validDataLength);
 
     /// <summary>
     /// Sao chép đường ống: ĐỌC song song (đầu đĩa SSD chịu QD cao) nhưng GHI một luồng duy nhất THEO ĐÚNG THỨ TỰ chunk.

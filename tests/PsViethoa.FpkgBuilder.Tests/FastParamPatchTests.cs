@@ -15,23 +15,17 @@ public sealed class FastParamPatchTests
     [Fact]
     public void Patch_ReplacesParamJsonAndReseals()
     {
-        if (!File.Exists(Source))
+        var rawParam = Path.Combine(Path.GetTempPath(), "opencode", "pragmata-param.json");
+        if (!File.Exists(Source) || !File.Exists(rawParam))
         {
             return; // 이 머신에만 있는 진단 파일
-        }
-
-        // 원본 param.json은 이전에 뽑아 둔 것을 쓴다 (라이브러리가 파일을 물기 전 상태 유지).
-        var rawParam = Path.Combine(Path.GetTempPath(), "opencode", "pragmata-param.json");
-        if (!File.Exists(rawParam))
-        {
-            return;
         }
 
         var copy = Path.Combine(Path.GetTempPath(), "opencode", "sackboy-fastpatch.pkg");
         TryDelete(copy);
         try
         {
-            const string newTitle = "PRAGMATA FASTPATCH OK";
+            const string newTitle = "프래그마 FASTPATCH OK 한글";
             var node = JsonNode.Parse(File.ReadAllText(rawParam))!.AsObject();
             var localized = node["localizedParameters"]!.AsObject();
             var language = localized["defaultLanguage"]?.GetValue<string>() ?? "en-US";

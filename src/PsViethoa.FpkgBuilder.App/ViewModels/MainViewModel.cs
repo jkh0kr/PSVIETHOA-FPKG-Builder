@@ -2586,7 +2586,12 @@ public sealed partial class MainViewModel : ObservableObject
     private PackageInfo? _editInfo;
     private CancellationTokenSource? _editInspectCancellation;
     private static readonly System.Text.Json.JsonDocumentOptions EditJsonDocumentOptions = new() { AllowTrailingCommas = true, CommentHandling = System.Text.Json.JsonCommentHandling.Skip };
-    private static readonly System.Text.Json.JsonSerializerOptions EditJsonWriteOptions = new() { WriteIndented = true };
+    private static readonly System.Text.Json.JsonSerializerOptions EditJsonWriteOptions = new()
+    {
+        WriteIndented = true,
+        // Hiển thị tiếng Hàn/tiếng Việt nguyên văn thay vì \uXXXX — Sony vốn ghi param.json bằng UTF-8 thật (ensure_ascii=False).
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     [ObservableProperty] private string _editPkgPath = string.Empty;
     [ObservableProperty] private bool _isInspectingEditPkg;
@@ -2787,7 +2792,11 @@ public sealed partial class MainViewModel : ObservableObject
             {
                 if (System.Text.Json.Nodes.JsonNode.Parse(payload, documentOptions: EditJsonDocumentOptions) is System.Text.Json.Nodes.JsonObject compact)
                 {
-                    payload = compact.ToJsonString();
+                    payload = compact.ToJsonString(new System.Text.Json.JsonSerializerOptions
+                    {
+                        // Ghi tiếng Hàn nguyên văn UTF-8 (nhỏ hơn \uXXXX nên dễ vừa khe; cùng dạng với tool Sony).
+                        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                    });
                 }
             }
             catch (System.Text.Json.JsonException)
